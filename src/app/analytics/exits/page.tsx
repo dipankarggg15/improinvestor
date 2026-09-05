@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { updatePostExitObservationsAction } from "@/app/analytics/exits/actions";
+import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
 import { calculateExitReasonAnalytics, calculatePostExitEvidence, type EpisodeAnalyticsInput } from "@/lib/analytics/episodes";
 import { prisma } from "@/lib/db/prisma";
 import { listClosedEpisodes } from "@/lib/exits/service";
@@ -46,9 +47,12 @@ export default async function ExitAnalyticsPage({ searchParams }: ExitAnalyticsP
             <p className="mt-2 text-sm text-[var(--muted)]">Closed position episodes, stored exit snapshots, and post-exit observations.</p>
           </div>
           <form action={updatePostExitObservationsAction}>
-            <button className="h-10 rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white" type="submit">
+            <ConfirmSubmitButton
+              confirmMessage="Update missing post-exit observations from the stored synthetic price history?"
+              pendingLabel="Updating..."
+            >
               Update Post-Exit Observations
-            </button>
+            </ConfirmSubmitButton>
           </form>
         </div>
 

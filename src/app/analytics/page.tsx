@@ -21,13 +21,21 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
   const selectedPortfolioId = query.portfolioId || portfolios[0]?.id;
   const selectedPortfolio = portfolios.find((portfolio) => portfolio.id === selectedPortfolioId);
   const selectedVersionId = query.strategyVersionId || undefined;
-  const evidence = await getStrategyEvidence(prisma, {
-    portfolioId: selectedPortfolioId,
-    strategyVersionId: selectedVersionId,
+  const dateRange = {
     startDate: parseDate(query.startDate),
     endDate: parseDate(query.endDate),
-  });
-  const summary = evidence.summaries[0];
+  };
+  const comparisonEvidence = await getStrategyEvidence(prisma, dateRange);
+  const selectedEvidence = selectedVersionId
+    ? await getStrategyEvidence(prisma, {
+        portfolioId: selectedPortfolioId,
+        strategyVersionId: selectedVersionId,
+        ...dateRange,
+      })
+    : comparisonEvidence;
+  const summary = selectedVersionId
+    ? selectedEvidence.summaries[0]
+    : comparisonEvidence.summaries.find((item) => item.portfolio.id === selectedPortfolioId) ?? comparisonEvidence.summaries[0];
 
   return (
     <section className="px-5 py-6 sm:px-8 lg:px-10">
@@ -185,7 +193,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
               />
             </div>
 
-            <StrategyComparison currentPortfolioId={summary.portfolio.id} />
+            <StrategyComparison currentPortfolioId={summary.portfolio.id} summaries={comparisonEvidence.summaries} />
 
             <Link className="inline-flex rounded-md border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--accent)]" href="/analytics/exits">
               Open Exit Analytics
@@ -199,12 +207,19 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
   );
 }
 
-async function StrategyComparison({ currentPortfolioId }: { readonly currentPortfolioId: string }) {
-  const evidence = await getStrategyEvidence(prisma);
+type StrategyEvidenceSummary = Awaited<ReturnType<typeof getStrategyEvidence>>["summaries"][number];
+
+function StrategyComparison({
+  currentPortfolioId,
+  summaries,
+}: {
+  readonly currentPortfolioId: string;
+  readonly summaries: readonly StrategyEvidenceSummary[];
+}) {
   return (
     <Section title="Strategy Comparison">
       <SimpleTable heads={["Portfolio", "Total Return", "CAGR", "MDD", "Win Rate", "Avg Winner", "Avg Loser", "Profit Factor", "Avg Invested", "Top 1 Contribution"]}>
-        {evidence.summaries.map((summary) => (
+        {summaries.map((summary) => (
           <tr className={`border-t border-[var(--border)] ${summary.portfolio.id === currentPortfolioId ? "bg-[var(--panel-soft)]" : ""}`} key={summary.portfolio.id}>
             <td className="py-3 pr-3">{summary.strategy.name}</td>
             <td className="py-3 pr-3">{formatPercent(summary.performance.totalReturnPercent?.toNumber())}</td>

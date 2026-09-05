@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { recordTradeAction } from "@/app/portfolio/actions";
+import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
 import { prisma } from "@/lib/db/prisma";
 import { calculateRequiredCash, getDefaultTradePrice } from "@/lib/portfolio/service";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/ui/format";
@@ -116,9 +117,13 @@ export default async function NewTradePage({ searchParams }: NewTradePageProps) 
           <p className="mt-4 text-sm text-[var(--muted)]">
             {reviewSnapshot ? "This SELL is manual execution; the review recommendation alone does not change the portfolio." : `Default required cash: ${formatCurrency(requiredCash.toNumber())}.`} Edit quantity, price, or fees before saving if needed.
           </p>
-          <button className="mt-5 h-11 rounded-md bg-[var(--accent)] px-5 text-sm font-semibold text-white" type="submit">
+          <ConfirmSubmitButton
+            className="mt-5 h-11 rounded-md bg-[var(--accent)] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            confirmMessage={`Record this ${reviewSnapshot ? "SELL" : "BUY"} trade in the immutable trade ledger?`}
+            pendingLabel="Saving..."
+          >
             Save {reviewSnapshot ? "Sell" : "Trade"}
-          </button>
+          </ConfirmSubmitButton>
         </form>
       </div>
     </section>

@@ -2,7 +2,7 @@
 
 ImproInvestor is a private personal Indian equities strategy research workspace.
 
-The current version includes a synthetic market-data system, Custom Return Screener, historical strategy-run engine with immutable strategy versions, synthetic portfolio/trade accounting, and immutable strategy review recommendations. It intentionally does not include real provider integrations, authentication, automatic trading/order execution, or background review automation.
+The current version includes a synthetic market-data system, Custom Return Screener, historical strategy-run engine with immutable strategy versions, synthetic portfolio/trade accounting, immutable strategy review recommendations, and single-owner Supabase authentication. It intentionally does not include real provider integrations, automatic trading/order execution, or background review automation.
 
 ## Stack
 
@@ -31,11 +31,21 @@ cp .env.example .env
 Required when using Prisma:
 
 ```bash
-DATABASE_URL="postgresql://USER:PASSWORD@POOLER-HOST:PORT/postgres"
+DATABASE_URL="postgresql://USER:PASSWORD@TRANSACTION-POOLER-HOST:6543/postgres?pgbouncer=true&connection_limit=1"
 DIRECT_URL="postgresql://USER:PASSWORD@DIRECT-HOST:5432/postgres"
 ```
 
-For Supabase, use the pooled connection string for `DATABASE_URL` and the direct connection string for `DIRECT_URL`. Prisma Client uses `DATABASE_URL` for normal application queries, while Prisma Migrate uses `DIRECT_URL` through `directUrl` in `prisma/schema.prisma`.
+For Supabase on Vercel/serverless, use the transaction pooler connection string for `DATABASE_URL` and the direct connection string for `DIRECT_URL`. Prisma Client uses `DATABASE_URL` for normal application queries, while Prisma Migrate uses `DIRECT_URL` through `directUrl` in `prisma/schema.prisma`.
+
+Required for authentication:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+OWNER_EMAIL=
+```
+
+Only the authenticated Supabase Auth user whose email matches `OWNER_EMAIL` can access the application. Do not use a service-role key in any `NEXT_PUBLIC_*` variable.
 
 Market-data provider configuration:
 
@@ -46,6 +56,12 @@ SYNTHETIC_MARKET_SEED=20260103
 ```
 
 Never commit `.env` files. They are ignored by Git.
+
+## Production Privacy
+
+ImproInvestor is a single-owner private app. Protected routes redirect unauthenticated requests to `/login`, and every durable Server Action calls the shared owner guard before writing data.
+
+For an extra outer layer, Vercel Deployment Protection can also be enabled, but it should not replace application authentication.
 
 ## Run Locally
 

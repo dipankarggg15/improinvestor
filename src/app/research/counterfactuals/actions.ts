@@ -2,10 +2,13 @@
 
 import { redirect } from "next/navigation";
 
+import { requireOwner } from "@/lib/auth/server";
 import { prisma } from "@/lib/db/prisma";
 import { createAndRunCounterfactualExperiment } from "@/lib/counterfactuals/service";
 
 export async function runCounterfactualExperimentAction(formData: FormData) {
+  await requireOwner();
+
   const strategyId = String(formData.get("strategyId") ?? "");
   const strategyVersionId = String(formData.get("strategyVersionId") ?? "");
   const parameter = String(formData.get("parameter") ?? "");

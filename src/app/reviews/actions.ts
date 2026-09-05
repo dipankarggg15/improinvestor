@@ -2,10 +2,13 @@
 
 import { redirect } from "next/navigation";
 
+import { requireOwner } from "@/lib/auth/server";
 import { prisma } from "@/lib/db/prisma";
 import { runPortfolioReview, type ReviewType } from "@/lib/reviews/service";
 
 export async function runReviewAction(formData: FormData) {
+  await requireOwner();
+
   const portfolioId = String(formData.get("portfolioId") ?? "");
   const reviewTypeValue = String(formData.get("reviewType") ?? "SCHEDULED");
   const reviewDateValue = String(formData.get("reviewDate") ?? "");

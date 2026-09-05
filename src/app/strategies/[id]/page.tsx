@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { cloneStrategyVersionAction, runStrategyAction } from "@/app/strategies/actions";
+import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
 import { prisma } from "@/lib/db/prisma";
 import { parseStrategyConfig } from "@/lib/strategies/config";
 import { formatDate } from "@/lib/ui/format";
@@ -56,15 +57,23 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
                   type="date"
                 />
               </label>
-              <button className="mt-4 h-11 w-full rounded-md bg-[var(--accent)] text-sm font-semibold text-white" type="submit">
+              <ConfirmSubmitButton
+                className="mt-4 h-11 w-full rounded-md bg-[var(--accent)] text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                confirmMessage="Run the current strategy version and permanently store the historical candidate snapshots?"
+                pendingLabel="Running..."
+              >
                 Run Current Version
-              </button>
+              </ConfirmSubmitButton>
             </form>
             <form action={cloneStrategyVersionAction} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
               <input name="strategyId" type="hidden" value={strategy.id} />
-              <button className="h-10 w-full rounded-md border border-[var(--border)] text-sm font-semibold" type="submit">
+              <ConfirmSubmitButton
+                className="h-10 w-full rounded-md border border-[var(--border)] text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                confirmMessage="Create a new immutable strategy version copied from the current version?"
+                pendingLabel="Creating..."
+              >
                 Create Next Version Copy
-              </button>
+              </ConfirmSubmitButton>
             </form>
           </div>
         </div>

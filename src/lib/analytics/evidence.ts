@@ -15,6 +15,7 @@ import {
   calculateRecommendationExecutionAnalytics,
   type EpisodeAnalyticsInput,
 } from "@/lib/analytics/episodes";
+import { timeAsync } from "@/lib/logging/timing";
 import { parseStrategyConfig } from "@/lib/strategies/config";
 
 export type StrategyEvidenceRequest = {
@@ -26,6 +27,10 @@ export type StrategyEvidenceRequest = {
 };
 
 export async function getStrategyEvidence(client: PrismaClient, request: StrategyEvidenceRequest = {}) {
+  return timeAsync("analytics.getStrategyEvidence", () => getStrategyEvidenceInternal(client, request), 1_000);
+}
+
+async function getStrategyEvidenceInternal(client: PrismaClient, request: StrategyEvidenceRequest = {}) {
   const portfolios = await client.portfolio.findMany({
     where: {
       id: request.portfolioId,

@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 const navigationItems = [
@@ -13,17 +16,25 @@ const navigationItems = [
 ] as const;
 
 export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
+  const pathname = usePathname();
+
+  if (pathname === "/login") {
+    return <>{children}</>;
+  }
+
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-[var(--border)] bg-[var(--panel)] px-5 py-6 md:block">
         <Brand />
-        <div className="mt-6 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold uppercase text-amber-900">
-          SYNTHETIC MARKET DATA
-        </div>
+        <StatusBadges />
         <nav aria-label="Primary navigation" className="mt-10 space-y-1">
           {navigationItems.map((item) => (
             <Link
-              className="block rounded-md px-3 py-2 text-sm font-medium text-[var(--muted)] transition hover:bg-[var(--panel-soft)] hover:text-[var(--foreground)]"
+              className={`block rounded-md px-3 py-2 text-sm font-medium transition ${
+                isActive(pathname, item.href)
+                  ? "bg-[var(--panel-soft)] text-[var(--foreground)]"
+                  : "text-[var(--muted)] hover:bg-[var(--panel-soft)] hover:text-[var(--foreground)]"
+              }`}
               href={item.href}
               key={item.href}
             >
@@ -36,16 +47,18 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
       <div className="md:pl-64">
         <header className="sticky top-0 z-10 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--background)_92%,white)] px-5 py-4 backdrop-blur md:hidden">
           <Brand />
-          <div className="mt-3 inline-flex rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold uppercase text-amber-900">
-            SYNTHETIC MARKET DATA
-          </div>
+          <StatusBadges compact />
           <nav
             aria-label="Primary navigation"
             className="mt-4 flex gap-2 overflow-x-auto pb-1"
           >
             {navigationItems.map((item) => (
               <Link
-                className="shrink-0 rounded-md border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-sm font-medium text-[var(--muted)]"
+                className={`shrink-0 rounded-md border px-3 py-2 text-sm font-medium ${
+                  isActive(pathname, item.href)
+                    ? "border-[var(--accent)] bg-[var(--panel-soft)] text-[var(--foreground)]"
+                    : "border-[var(--border)] bg-[var(--panel)] text-[var(--muted)]"
+                }`}
                 href={item.href}
                 key={item.href}
               >
@@ -72,4 +85,27 @@ function Brand() {
       </span>
     </Link>
   );
+}
+
+function StatusBadges({ compact = false }: { readonly compact?: boolean }) {
+  return (
+    <div className={`${compact ? "mt-3 flex flex-wrap" : "mt-6 grid"} gap-2`}>
+      <span className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold uppercase text-emerald-900">
+        PRIVATE
+      </span>
+      <span className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold uppercase text-amber-900">
+        SYNTHETIC MARKET DATA
+      </span>
+      <form action="/auth/logout" method="post">
+        <button className={`${compact ? "" : "mt-2 w-full text-left"} rounded-md border border-[var(--border)] px-3 py-2 text-xs font-semibold uppercase text-[var(--muted)] hover:bg-[var(--panel-soft)]`} type="submit">
+          Logout
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function isActive(pathname: string, href: string) {
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
 }

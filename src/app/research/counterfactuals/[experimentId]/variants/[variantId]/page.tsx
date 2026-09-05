@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCounterfactualExperiment } from "@/lib/counterfactuals/service";
+import { getCounterfactualVariantDetail } from "@/lib/counterfactuals/service";
 import { formatCurrency, formatDate, formatPercent, formatQuantity } from "@/lib/ui/format";
 
 export const dynamic = "force-dynamic";
@@ -12,9 +12,10 @@ type PageProps = {
 
 export default async function CounterfactualVariantPage({ params }: PageProps) {
   const { experimentId, variantId } = await params;
-  const experiment = await getCounterfactualExperiment(prisma, experimentId);
-  const variant = experiment?.variants.find((item) => item.id === variantId);
-  const run = variant?.runs[0];
+  const detail = await getCounterfactualVariantDetail(prisma, experimentId, variantId);
+  const experiment = detail?.experiment;
+  const variant = detail?.variant;
+  const run = detail?.run;
   if (!experiment || !variant || !run) notFound();
   const metrics = run.metrics && typeof run.metrics === "object" ? run.metrics as Record<string, unknown> : {};
 

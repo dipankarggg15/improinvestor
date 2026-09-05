@@ -2,10 +2,13 @@
 
 import { redirect } from "next/navigation";
 
+import { requireOwner } from "@/lib/auth/server";
 import { prisma } from "@/lib/db/prisma";
 import { createNextStrategyVersion, runCurrentStrategyVersion } from "@/lib/strategies/run-service";
 
 export async function runStrategyAction(formData: FormData) {
+  await requireOwner();
+
   const strategyId = String(formData.get("strategyId") ?? "");
   const runDateValue = String(formData.get("runDate") ?? "");
 
@@ -22,6 +25,8 @@ export async function runStrategyAction(formData: FormData) {
 }
 
 export async function cloneStrategyVersionAction(formData: FormData) {
+  await requireOwner();
+
   const strategyId = String(formData.get("strategyId") ?? "");
   const latest = await prisma.strategyVersion.findFirst({
     where: { strategyId },

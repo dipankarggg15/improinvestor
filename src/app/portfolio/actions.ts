@@ -2,11 +2,14 @@
 
 import { redirect } from "next/navigation";
 
+import { requireOwner } from "@/lib/auth/server";
 import { prisma } from "@/lib/db/prisma";
 import { rebuildPositionEpisodes, updateMissingPostExitObservations } from "@/lib/exits/service";
 import { recordTrade } from "@/lib/portfolio/service";
 
 export async function recordTradeAction(formData: FormData) {
+  await requireOwner();
+
   const portfolioId = String(formData.get("portfolioId") ?? "");
   const companyId = String(formData.get("companyId") ?? "");
   const instrumentId = String(formData.get("instrumentId") ?? "");

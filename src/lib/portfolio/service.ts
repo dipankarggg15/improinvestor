@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import { timeAsync } from "@/lib/logging/timing";
 import { calculatePortfolioLedger, decimal, valuePortfolio, type PortfolioValuation } from "@/lib/portfolio/accounting";
 
 export type RecordTradeInput = {
@@ -117,6 +118,14 @@ export async function valuePortfolioAsOf(
   portfolioId: string,
   asOfDate: Date,
 ): Promise<PortfolioValuation & { portfolio: PortfolioWithStrategy }> {
+  return timeAsync("portfolio.valuePortfolioAsOf", () => valuePortfolioAsOfInternal(client, portfolioId, asOfDate), 1_000);
+}
+
+async function valuePortfolioAsOfInternal(
+  client: PrismaClient,
+  portfolioId: string,
+  asOfDate: Date,
+): Promise<PortfolioValuation & { portfolio: PortfolioWithStrategy }> {
   const portfolio = await client.portfolio.findUniqueOrThrow({
     where: { id: portfolioId },
     include: { strategy: true },
@@ -145,12 +154,42 @@ export async function valuePortfolioAsOf(
 }
 
 export async function listPortfolioValuations(client: PrismaClient, asOfDate: Date) {
-  const portfolios = await client.portfolio.findMany({
-    orderBy: { name: "asc" },
-    include: { strategy: true },
-  });
+  return timeAsync("portfolio.listPortfolioValuations", async () => {
+    const [portfolios, trades] = await Promise.all([
+      client.portfolio.findMany({
+        orderBy: { name: "asc" },
+        include: { strategy: true },
+      }),
+      client.trade.findMany({
+        where: { tradeDate: { lte: asOfDate } },
+        orderBy: [{ portfolioId: "asc" }, { tradeDate: "asc" }, { createdAt: "asc" }],
+      }),
+    ]);
+    const instrumentIds = [...new Set(trades.map((trade) => trade.instrumentId))];
+    const prices = instrumentIds.length
+      ? await client.dailyPrice.findMany({
+          where: {
+            instrumentId: { in: instrumentIds },
+            tradingDate: { lte: asOfDate },
+          },
+          orderBy: [{ instrumentId: "asc" }, { tradingDate: "desc" }],
+          select: { instrumentId: true, tradingDate: true, close: true },
+        })
+      : [];
+    const tradesByPortfolioId = new Map<string, typeof trades>();
 
-  return Promise.all(portfolios.map((portfolio) => valuePortfolioAsOf(client, portfolio.id, asOfDate)));
+    for (const trade of trades) {
+      tradesByPortfolioId.set(trade.portfolioId, [
+        ...(tradesByPortfolioId.get(trade.portfolioId) ?? []),
+        trade,
+      ]);
+    }
+
+    return portfolios.map((portfolio) => ({
+      portfolio,
+      ...valuePortfolio(portfolio.initialCapital, tradesByPortfolioId.get(portfolio.id) ?? [], prices, asOfDate),
+    }));
+  }, 1_000);
 }
 
 export async function getDefaultTradePrice(client: PrismaClient, instrumentId: string, tradeDate: Date) {

@@ -16,6 +16,15 @@ type PrismaTransaction = Omit<
 
 type DbClient = PrismaClient | PrismaTransaction;
 
+type ClosedEpisodeFilters = {
+  readonly portfolioId?: string;
+  readonly strategyId?: string;
+  readonly fromDate?: Date;
+  readonly toDate?: Date;
+  readonly exitSource?: "REVIEW_RECOMMENDATION" | "MANUAL";
+  readonly reason?: string;
+};
+
 export async function rebuildPositionEpisodes(client: PrismaClient) {
   return client.$transaction(async (tx) => {
     await tx.postExitObservation.deleteMany({});
@@ -209,6 +218,7 @@ export async function listClosedEpisodes(client: DbClient, filters?: ClosedEpiso
   return client.positionEpisode.findMany({
     where: {
       status: "CLOSED",
+      portfolioId: filters?.portfolioId || undefined,
       strategyId: filters?.strategyId || undefined,
       closedAt: {
         gte: filters?.fromDate,
@@ -270,14 +280,6 @@ export async function getPositionEpisodeDetail(client: DbClient, portfolioId: st
     },
   });
 }
-
-type ClosedEpisodeFilters = {
-  readonly strategyId?: string;
-  readonly exitSource?: "REVIEW_RECOMMENDATION" | "MANUAL";
-  readonly reason?: string;
-  readonly fromDate?: Date;
-  readonly toDate?: Date;
-};
 
 async function pricesAfterEarliestExitByInstrument(
   client: DbClient,

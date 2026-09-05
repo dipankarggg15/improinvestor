@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { prisma } from "@/lib/db/prisma";
-import { getCounterfactualExperiment } from "@/lib/counterfactuals/service";
+import { getCounterfactualExperimentOverview } from "@/lib/counterfactuals/service";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/ui/format";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ type PageProps = {
 
 export default async function CounterfactualExperimentPage({ params }: PageProps) {
   const { experimentId } = await params;
-  const experiment = await getCounterfactualExperiment(prisma, experimentId);
+  const experiment = await getCounterfactualExperimentOverview(prisma, experimentId);
   if (!experiment) notFound();
   const control = experiment.variants.find((variant) => variant.isControl)?.runs[0];
 
@@ -113,7 +113,7 @@ export default async function CounterfactualExperimentPage({ params }: PageProps
   );
 }
 
-function decisionDifferences(variants: NonNullable<Awaited<ReturnType<typeof getCounterfactualExperiment>>>["variants"]) {
+function decisionDifferences(variants: NonNullable<Awaited<ReturnType<typeof getCounterfactualExperimentOverview>>>["variants"]) {
   const control = variants.find((variant) => variant.isControl)?.runs[0];
   if (!control) return [];
   const controlByKey = new Map(control.decisions.map((decision) => [`${formatDate(decision.decisionDate)}:${decision.companyId}`, decision]));

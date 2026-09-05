@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { runReviewAction } from "@/app/reviews/actions";
+import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
 import { prisma } from "@/lib/db/prisma";
 import { listClosedEpisodes } from "@/lib/exits/service";
 import { valuePortfolioAsOf } from "@/lib/portfolio/service";
@@ -41,8 +42,7 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
   if (!portfolio) notFound();
 
   const valuation = await valuePortfolioAsOf(prisma, portfolio.id, new Date());
-  const closedEpisodes = await listClosedEpisodes(prisma, { strategyId: portfolio.strategyId });
-  const portfolioClosedEpisodes = closedEpisodes.filter((episode) => episode.portfolioId === portfolio.id);
+  const portfolioClosedEpisodes = await listClosedEpisodes(prisma, { portfolioId: portfolio.id });
   const companies = await prisma.company.findMany({
     where: { id: { in: valuation.positions.map((position) => position.companyId) } },
     include: { instruments: true },
@@ -176,9 +176,12 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
               <input name="portfolioId" type="hidden" value={portfolio.id} />
               <input name="reviewType" type="hidden" value="SCHEDULED" />
               <input className="h-10 rounded-md border border-[var(--border)] px-3 text-sm" defaultValue={formatDate(new Date())} name="reviewDate" type="date" />
-              <button className="h-10 rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white" type="submit">
+              <ConfirmSubmitButton
+                confirmMessage="Run this portfolio review and permanently store its review snapshots?"
+                pendingLabel="Running..."
+              >
                 Run Review
-              </button>
+              </ConfirmSubmitButton>
             </form>
           </div>
           <div className="mt-4 overflow-x-auto">
@@ -215,9 +218,13 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
                             <input name="portfolioId" type="hidden" value={portfolio.id} />
                             <input name="reviewType" type="hidden" value="EMERGENCY" />
                             <input name="reviewDate" type="hidden" value={formatDate(new Date())} />
-                            <button className="rounded-md border border-[var(--border)] px-2 py-1 text-xs font-semibold text-[var(--accent)]" type="submit">
+                            <ConfirmSubmitButton
+                              className="rounded-md border border-[var(--border)] px-2 py-1 text-xs font-semibold text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
+                              confirmMessage="Run an emergency stop review and permanently store its review snapshot?"
+                              pendingLabel="Checking..."
+                            >
                               Check Emergency Stop
-                            </button>
+                            </ConfirmSubmitButton>
                           </form>
                         ) : (
                           "-"

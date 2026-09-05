@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { counterfactualOverrideSchema, type CounterfactualOverrides } from "@/lib/counterfactuals/config";
+import { timeAsync } from "@/lib/logging/timing";
 import {
   counterfactualEngineVersion,
   simulateCounterfactual,
@@ -122,14 +123,72 @@ export async function seedCounterfactualExperiment(input: {
 }
 
 export async function listCounterfactualExperiments(client: PrismaClient) {
-  return client.counterfactualExperiment.findMany({
+  return timeAsync("counterfactuals.listExperiments", () => client.counterfactualExperiment.findMany({
     orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      startDate: true,
+      endDate: true,
+      initialCapital: true,
+      status: true,
+      baseStrategy: { select: { name: true } },
+      baseStrategyVersion: { select: { versionNumber: true } },
+      variants: { select: { id: true }, orderBy: { createdAt: "asc" } },
+    },
+  }), 1_000);
+}
+
+export async function getCounterfactualExperimentOverview(client: PrismaClient, id: string) {
+  return timeAsync("counterfactuals.getExperimentOverview", () => client.counterfactualExperiment.findUnique({
+    where: { id },
     include: {
       baseStrategy: true,
       baseStrategyVersion: true,
-      variants: { include: { runs: true }, orderBy: { createdAt: "asc" } },
+      variants: {
+        orderBy: [{ isControl: "desc" }, { createdAt: "asc" }],
+        include: {
+          runs: {
+            select: {
+              id: true,
+              metrics: true,
+              dailyEquity: { orderBy: { date: "asc" } },
+              decisions: {
+                take: 300,
+                include: { company: true, instrument: true },
+                orderBy: [{ decisionDate: "asc" }, { createdAt: "asc" }],
+              },
+            },
+          },
+        },
+      },
+    },
+  }), 1_000);
+}
+
+export async function getCounterfactualVariantDetail(client: PrismaClient, experimentId: string, variantId: string) {
+  return timeAsync("counterfactuals.getVariantDetail", async () => {
+  const experiment = await client.counterfactualExperiment.findUnique({
+    where: { id: experimentId },
+    include: {
+      baseStrategy: true,
+      baseStrategyVersion: true,
+      variants: {
+        where: { id: variantId },
+        include: {
+          runs: {
+            include: {
+              trades: { include: { company: true, instrument: true }, orderBy: [{ tradeDate: "asc" }, { createdAt: "asc" }] },
+              positionEpisodes: { include: { company: true, instrument: true }, orderBy: [{ openedAt: "asc" }] },
+            },
+          },
+        },
+      },
     },
   });
+  const variant = experiment?.variants[0] ?? null;
+  return experiment && variant ? { experiment, variant, run: variant.runs[0] ?? null } : null;
+  }, 1_000);
 }
 
 export async function getCounterfactualExperiment(client: PrismaClient, id: string) {
