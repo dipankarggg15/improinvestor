@@ -14,18 +14,15 @@ type AnalyticsPageProps = {
 
 export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps) {
   const query = await searchParams;
-  const portfolios = await prisma.portfolio.findMany({
-    orderBy: { name: "asc" },
-    include: { strategy: { include: { versions: { orderBy: { versionNumber: "asc" } } } } },
-  });
-  const selectedPortfolioId = query.portfolioId || portfolios[0]?.id;
-  const selectedPortfolio = portfolios.find((portfolio) => portfolio.id === selectedPortfolioId);
   const selectedVersionId = query.strategyVersionId || undefined;
   const dateRange = {
     startDate: parseDate(query.startDate),
     endDate: parseDate(query.endDate),
   };
   const comparisonEvidence = await getStrategyEvidence(prisma, dateRange);
+  const portfolios = comparisonEvidence.summaries.map((summary) => summary.portfolio);
+  const selectedPortfolioId = query.portfolioId || portfolios[0]?.id;
+  const selectedPortfolio = portfolios.find((portfolio) => portfolio.id === selectedPortfolioId);
   const selectedEvidence = selectedVersionId
     ? await getStrategyEvidence(prisma, {
         portfolioId: selectedPortfolioId,
@@ -91,7 +88,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
                 <LineChart points={summary.equityCurve} value={(point) => point.totalEquity.toNumber()} />
               </ChartPanel>
               <ChartPanel title="Drawdown Over Time">
-                <LineChart points={summary.equityCurve} value={(point, index, points) => drawdownAt(points, index)} />
+                <DrawdownChart points={summary.equityCurve} />
               </ChartPanel>
             </div>
 
@@ -255,9 +252,33 @@ function LineChart({ points, value }: { readonly points: readonly EquityCurvePoi
   );
 }
 
-function drawdownAt(points: readonly EquityCurvePoint[], index: number) {
-  const peak = points.slice(0, index + 1).reduce((max, point) => Math.max(max, point.totalEquity.toNumber()), 0);
-  return peak === 0 ? 0 : (points[index]!.totalEquity.toNumber() / peak - 1) * 100;
+function DrawdownChart({ points }: { readonly points: readonly EquityCurvePoint[] }) {
+  return <ValueLineChart values={drawdownValues(points)} />;
+}
+
+function drawdownValues(points: readonly EquityCurvePoint[]) {
+  let peak = 0;
+  return points.map((point) => {
+    const totalEquity = point.totalEquity.toNumber();
+    peak = Math.max(peak, totalEquity);
+    return peak === 0 ? 0 : (totalEquity / peak - 1) * 100;
+  });
+}
+
+function ValueLineChart({ values }: { readonly values: readonly number[] }) {
+  const min = Math.min(...values, 0);
+  const max = Math.max(...values, 1);
+  const spread = max - min || 1;
+  const path = values.map((item, index) => {
+    const x = values.length <= 1 ? 0 : index / (values.length - 1) * 100;
+    const y = 40 - ((item - min) / spread * 36);
+    return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join(" ");
+  return (
+    <svg aria-label="Chart" className="h-56 w-full" preserveAspectRatio="none" viewBox="0 0 100 44">
+      <path d={path} fill="none" stroke="var(--accent)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
 }
 
 function ChartPanel({ title, children }: { readonly title: string; readonly children: ReactNode }) {

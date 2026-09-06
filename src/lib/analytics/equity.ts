@@ -153,7 +153,12 @@ function pricesGroupedByDate(prices: readonly PricePoint[], startDate: Date, end
   for (const price of prices) {
     if (price.tradingDate < startDate || price.tradingDate > endDate) continue;
     const key = dateKey(price.tradingDate);
-    grouped.set(key, [...(grouped.get(key) ?? []), price]);
+    const pricesForDate = grouped.get(key);
+    if (pricesForDate) {
+      pricesForDate.push(price);
+    } else {
+      grouped.set(key, [price]);
+    }
   }
   return grouped;
 }

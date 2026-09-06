@@ -104,7 +104,12 @@ export function calculateHoldingAnalytics(episodes: readonly EpisodeAnalyticsInp
 export function calculateEntryRankAnalytics(episodes: readonly EpisodeAnalyticsInput[]) {
   const byRank = new Map<number, EpisodeAnalyticsInput[]>();
   for (const episode of episodes.filter((item) => item.status === "CLOSED" && item.exitSnapshot && item.entryRank)) {
-    byRank.set(episode.entryRank!, [...(byRank.get(episode.entryRank!) ?? []), episode]);
+    const rankEpisodes = byRank.get(episode.entryRank!);
+    if (rankEpisodes) {
+      rankEpisodes.push(episode);
+    } else {
+      byRank.set(episode.entryRank!, [episode]);
+    }
   }
   return [...byRank.entries()].sort(([left], [right]) => left - right).map(([rank, rows]) => {
     const winners = rows.filter((row) => decimal(row.exitSnapshot!.totalRealizedPnl).gt(0));
@@ -126,7 +131,12 @@ export function calculateExitReasonAnalytics(episodes: readonly EpisodeAnalytics
       ? episode.exitSnapshot!.recommendationReasons
       : [episode.exitSnapshot!.exitSource === "MANUAL" ? "MANUAL" : "REVIEW_RECOMMENDATION"];
     for (const reason of reasons) {
-      groups.set(reason, [...(groups.get(reason) ?? []), episode]);
+      const reasonEpisodes = groups.get(reason);
+      if (reasonEpisodes) {
+        reasonEpisodes.push(episode);
+      } else {
+        groups.set(reason, [episode]);
+      }
     }
   }
   return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([reason, rows]) => {
