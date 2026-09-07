@@ -73,7 +73,7 @@ export default async function TradesPage({ searchParams }: TradesPageProps) {
           </div>
           <Link
             className="inline-flex h-11 items-center rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)]"
-            href="/portfolio/trades/new"
+            href="/trades/new"
           >
             + Record Trade
           </Link>

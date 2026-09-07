@@ -12,7 +12,7 @@ export async function recordTradeAction(formData: FormData) {
 
   const stockKey = nullableString(formData.get("stockKey"));
   const stockParts = stockKey?.split(":") ?? [];
-  const [stockPortfolioId, stockCompanyId, stockInstrumentId] = stockParts.length === 3
+  const [stockPortfolioId, stockCompanyId, stockInstrumentId] = stockParts.length >= 3
     ? stockParts
     : [null, stockParts[0], stockParts[1]];
   const portfolioId = stockPortfolioId || String(formData.get("portfolioId") ?? "");
@@ -28,7 +28,7 @@ export async function recordTradeAction(formData: FormData) {
   if (side !== "BUY" && side !== "SELL") throw new Error("Invalid trade side.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(tradeDateValue)) throw new Error("Trade date is required.");
 
-  const trade = await recordTrade(prisma, {
+  await recordTrade(prisma, {
     portfolioId,
     companyId,
     instrumentId,
@@ -46,7 +46,7 @@ export async function recordTradeAction(formData: FormData) {
   await rebuildPositionEpisodes(prisma);
   await updateMissingPostExitObservations(prisma);
 
-  redirect(`/portfolio/${portfolioId}/trades/${trade.id}`);
+  redirect("/trades");
 }
 
 function nullableString(value: FormDataEntryValue | null) {

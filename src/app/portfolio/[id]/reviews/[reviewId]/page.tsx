@@ -89,7 +89,7 @@ export default async function ReviewDetailPage({ params }: ReviewDetailPageProps
               {snapshot.recommendation === "SELL" ? (
                 <Link
                   className="mt-4 inline-flex rounded-md border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--accent)]"
-                  href={`/portfolio/trades/new?reviewSnapshotId=${snapshot.id}`}
+                  href={`/trades/new?reviewSnapshotId=${snapshot.id}`}
                 >
                   Record Sell
                 </Link>

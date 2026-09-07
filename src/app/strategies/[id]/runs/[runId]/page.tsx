@@ -65,7 +65,7 @@ export default async function StrategyRunPage({ params, searchParams }: Strategy
       action: snapshot.selected ? (
         <Link
           className="rounded-md border border-[var(--border)] px-2 py-1 text-xs font-semibold text-[var(--accent)]"
-          href={`/portfolio/trades/new?candidateSnapshotId=${snapshot.id}`}
+          href={`/trades/new?candidateSnapshotId=${snapshot.id}`}
         >
           Record Buy
         </Link>
