@@ -89,6 +89,7 @@ async function getStrategyEvidenceInternal(client: PrismaClient, request: Strate
           companyId: true,
           instrumentId: true,
           strategyRunId: true,
+          strategyVersionId: true,
           strategyCandidateSnapshotId: true,
           strategyReviewPositionSnapshotId: true,
           side: true,
@@ -100,7 +101,6 @@ async function getStrategyEvidenceInternal(client: PrismaClient, request: Strate
           createdAt: true,
           strategyRun: request.strategyVersionId ? {
             select: {
-              id: true,
               strategyVersionId: true,
             },
           } : false,
@@ -155,6 +155,7 @@ async function getStrategyEvidenceInternal(client: PrismaClient, request: Strate
             id: true,
             portfolioId: true,
             strategyId: true,
+            strategyVersionId: true,
             companyId: true,
             instrumentId: true,
             originatingStrategyRunId: true,
@@ -217,28 +218,15 @@ async function getStrategyEvidenceInternal(client: PrismaClient, request: Strate
   const originatingCandidateIds = [...new Set(allEpisodes
     .map((episode) => episode.originatingStrategyCandidateSnapshotId)
     .filter((id): id is string => Boolean(id)))];
-  const [entryRanks, selectedVersionEpisodeIds] = await Promise.all([
+  const entryRanks = await (
     originatingCandidateIds.length
       ? profileAsync(request.profile, "strategyCandidateSnapshot.findMany.entryRanks", () => client.strategyCandidateSnapshot.findMany({
           where: { id: { in: originatingCandidateIds } },
           select: { id: true, rank: true },
         }), (snapshots) => snapshots.length)
-      : Promise.resolve([]),
-    request.strategyVersionId && allEpisodes.length
-      ? profileAsync(request.profile, "trade.findMany.versionEpisodes", () => client.trade.findMany({
-          where: {
-            positionEpisodeId: { in: allEpisodes.map((episode) => episode.id) },
-            strategyRun: { strategyVersionId: request.strategyVersionId },
-          },
-          distinct: ["positionEpisodeId"],
-          select: { positionEpisodeId: true },
-        }), (trades) => trades.length)
-      : Promise.resolve([]),
-  ]);
+      : Promise.resolve([])
+  );
   const entryRankByCandidateId = new Map(entryRanks.map((snapshot) => [snapshot.id, snapshot.rank]));
-  const selectedVersionEpisodeIdSet = new Set(selectedVersionEpisodeIds
-    .map((trade) => trade.positionEpisodeId)
-    .filter((id): id is string => Boolean(id)));
 
   for (const price of allPrices) {
     const instrumentPrices = pricesByInstrumentId.get(price.instrumentId);
@@ -278,8 +266,8 @@ async function getStrategyEvidenceInternal(client: PrismaClient, request: Strate
     const trades = portfolio.trades.filter((trade) => {
       if (!request.strategyVersionId) return true;
       return (
-        tradeVersionId(trade) === request.strategyVersionId ||
-        tradeCandidateRunId(trade) === trade.strategyRunId
+        trade.strategyVersionId === request.strategyVersionId ||
+        tradeRunVersionId(trade) === request.strategyVersionId
       );
     });
     const prices = instrumentIds.flatMap((instrumentId) => pricesByInstrumentId.get(instrumentId) ?? []);
@@ -287,7 +275,7 @@ async function getStrategyEvidenceInternal(client: PrismaClient, request: Strate
       episode.openedAt <= endDate && (!episode.closedAt || episode.closedAt >= startDate)
     ));
     const filteredEpisodes = request.strategyVersionId
-      ? episodes.filter((episode) => selectedVersionEpisodeIdSet.has(episode.id))
+      ? episodes.filter((episode) => episode.strategyVersionId === request.strategyVersionId)
       : episodes;
     const sellRecommendationCount = (sellRecommendationsByPortfolioId.get(portfolio.id) ?? [])
       .filter((recommendation) => recommendation.review.reviewDate >= startDate && recommendation.review.reviewDate <= endDate)
@@ -342,6 +330,7 @@ async function getStrategyEvidenceInternal(client: PrismaClient, request: Strate
 type EvidenceEpisode = {
   readonly id: string;
   readonly originatingStrategyCandidateSnapshotId: string | null;
+  readonly strategyVersionId: string | null;
   readonly openedAt: Date;
   readonly closedAt: Date | null;
   readonly status: "OPEN" | "CLOSED";
@@ -380,12 +369,8 @@ function latestDate(dates: readonly Date[]) {
   return dates.reduce<Date | null>((latest, date) => (!latest || latest < date ? date : latest), null);
 }
 
-function tradeVersionId(trade: { readonly strategyRun?: { readonly strategyVersionId: string } | null }) {
+function tradeRunVersionId(trade: { readonly strategyRun?: { readonly strategyVersionId: string } | null }) {
   return trade.strategyRun?.strategyVersionId;
-}
-
-function tradeCandidateRunId(trade: { readonly strategyCandidateSnapshot?: { readonly strategyRunId: string } | null }) {
-  return trade.strategyCandidateSnapshot?.strategyRunId;
 }
 
 async function profileAsync<T>(

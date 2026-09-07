@@ -14,6 +14,7 @@ export async function recordTradeAction(formData: FormData) {
   const companyId = String(formData.get("companyId") ?? "");
   const instrumentId = String(formData.get("instrumentId") ?? "");
   const strategyRunId = nullableString(formData.get("strategyRunId"));
+  const strategyVersionId = nullableString(formData.get("strategyVersionId"));
   const strategyCandidateSnapshotId = nullableString(formData.get("strategyCandidateSnapshotId"));
   const strategyReviewPositionSnapshotId = nullableString(formData.get("strategyReviewPositionSnapshotId"));
   const side = String(formData.get("side") ?? "BUY");
@@ -27,6 +28,7 @@ export async function recordTradeAction(formData: FormData) {
     companyId,
     instrumentId,
     strategyRunId,
+    strategyVersionId,
     strategyCandidateSnapshotId,
     strategyReviewPositionSnapshotId,
     side,

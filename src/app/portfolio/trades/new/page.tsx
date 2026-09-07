@@ -45,6 +45,12 @@ export default async function NewTradePage({ searchParams }: NewTradePageProps) 
   });
 
   if (!portfolio) notFound();
+  const strategyVersions = await prisma.strategyVersion.findMany({
+    where: { strategyId: portfolio.strategyId },
+    orderBy: { versionNumber: "desc" },
+    include: { strategy: true },
+  });
+  const defaultStrategyVersionId = snapshot?.strategyRun.strategyVersionId ?? "";
 
   const instrumentId = reviewSnapshot?.instrumentId ?? snapshot?.instrumentId;
   const companyId = reviewSnapshot?.companyId ?? snapshot?.companyId;
@@ -89,9 +95,27 @@ export default async function NewTradePage({ searchParams }: NewTradePageProps) 
           <input name="companyId" type="hidden" value={companyId} />
           <input name="instrumentId" type="hidden" value={instrumentId} />
           <input name="strategyRunId" type="hidden" value={snapshot?.strategyRunId ?? ""} />
+          {reviewSnapshot ? <input name="strategyVersionId" type="hidden" value="" /> : null}
           <input name="strategyCandidateSnapshotId" type="hidden" value={snapshot?.id ?? ""} />
           <input name="strategyReviewPositionSnapshotId" type="hidden" value={reviewSnapshot?.id ?? ""} />
           <input name="side" type="hidden" value={reviewSnapshot ? "SELL" : "BUY"} />
+          {!reviewSnapshot ? (
+            <label className="mb-4 grid gap-2 text-sm font-medium">
+              Strategy Attribution
+              <select
+                className="h-11 rounded-md border border-[var(--border)] px-3"
+                defaultValue={defaultStrategyVersionId}
+                name="strategyVersionId"
+              >
+                <option value="">None / Unassigned</option>
+                {strategyVersions.map((version) => (
+                  <option key={version.id} value={version.id}>
+                    {version.strategy.name} V{version.versionNumber}{version.label ? ` - ${version.label}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-medium">
               Trade Date

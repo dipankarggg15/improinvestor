@@ -77,6 +77,18 @@ describe("evaluateStrategy", () => {
     expect(result.selectedCount).toBe(result.eligibleCount);
   });
 
+  it("does not select companies already held by the same strategy version", () => {
+    const snapshot = fixtureSnapshot();
+    const heldCompanyId = snapshot.candidates[0]?.companyId;
+    const result = evaluateStrategy(momentum10V1Config, date("2025-12-31"), snapshot, {
+      activeHoldingCompanyIds: new Set(heldCompanyId ? [heldCompanyId] : []),
+    });
+
+    expect(result.candidates.find((candidate) => candidate.companyId === heldCompanyId)?.qualified).toBe(true);
+    expect(result.candidates.find((candidate) => candidate.companyId === heldCompanyId)?.selected).toBe(false);
+    expect(result.selectedCount).toBe(10);
+  });
+
   it("deduplicates dual listings by consuming one canonical instrument per company", () => {
     const snapshot = fixtureSnapshot(2);
     const result = evaluateStrategy(momentum10V1Config, date("2025-12-31"), {

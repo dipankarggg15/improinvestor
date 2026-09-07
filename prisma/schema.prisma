@@ -263,6 +263,8 @@ model StrategyVersion {
   strategy      Strategy      @relation(fields: [strategyId], references: [id], onDelete: Cascade)
   runs          StrategyRun[]
   reviews       StrategyReview[]
+  trades        Trade[]
+  positionEpisodes PositionEpisode[]
   counterfactualExperiments CounterfactualExperiment[]
 
   @@unique([strategyId, versionNumber])
@@ -348,6 +350,7 @@ model Trade {
   companyId                   String
   instrumentId                String
   strategyRunId               String?
+  strategyVersionId           String?
   strategyCandidateSnapshotId String?
   side                        TradeSide
   tradeDate                   DateTime                   @db.Date
@@ -360,6 +363,7 @@ model Trade {
   company                     Company                    @relation(fields: [companyId], references: [id], onDelete: Restrict)
   instrument                  Instrument                 @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
   strategyRun                 StrategyRun?               @relation(fields: [strategyRunId], references: [id], onDelete: Restrict)
+  strategyVersion             StrategyVersion?           @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
   strategyCandidateSnapshot   StrategyCandidateSnapshot? @relation(fields: [strategyCandidateSnapshotId], references: [id], onDelete: Restrict)
   strategyReviewPositionSnapshot StrategyReviewPositionSnapshot? @relation(fields: [strategyReviewPositionSnapshotId], references: [id], onDelete: Restrict)
   strategyReviewPositionSnapshotId String?
@@ -370,6 +374,7 @@ model Trade {
   @@index([companyId])
   @@index([instrumentId])
   @@index([strategyRunId])
+  @@index([strategyVersionId])
   @@index([strategyCandidateSnapshotId])
   @@index([strategyReviewPositionSnapshotId])
   @@index([positionEpisodeId])
@@ -447,6 +452,7 @@ model PositionEpisode {
   companyId                           String
   instrumentId                        String
   strategyId                          String
+  strategyVersionId                   String?
   originatingStrategyRunId            String?
   originatingStrategyCandidateSnapshotId String?
   openedAt                            DateTime                   @db.Date
@@ -462,12 +468,14 @@ model PositionEpisode {
   company                             Company                    @relation(fields: [companyId], references: [id], onDelete: Restrict)
   instrument                          Instrument                 @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
   strategy                            Strategy                   @relation(fields: [strategyId], references: [id], onDelete: Restrict)
+  strategyVersion                     StrategyVersion?           @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
   trades                              Trade[]
   exitSnapshot                        PositionExitSnapshot?
   postExitObservations                PostExitObservation[]
 
   @@index([portfolioId, companyId, status])
   @@index([portfolioId, status])
+  @@index([strategyVersionId, status])
   @@index([strategyId, closedAt])
   @@index([closedAt])
 }

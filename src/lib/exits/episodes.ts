@@ -13,6 +13,7 @@ export type EpisodeTrade = {
   readonly price: Prisma.Decimal | string | number;
   readonly fees: Prisma.Decimal | string | number;
   readonly strategyRunId?: string | null;
+  readonly strategyVersionId?: string | null;
   readonly strategyCandidateSnapshotId?: string | null;
   readonly strategyReviewPositionSnapshotId?: string | null;
 };
@@ -23,6 +24,7 @@ export type ReconstructedEpisode = {
   readonly companyId: string;
   readonly instrumentId: string;
   readonly strategyId: string;
+  readonly strategyVersionId: string | null;
   readonly originatingStrategyRunId: string | null;
   readonly originatingStrategyCandidateSnapshotId: string | null;
   readonly openedAt: Date;
@@ -96,6 +98,7 @@ export function reconstructPositionEpisodes(input: {
           companyId: trade.companyId,
           instrumentId: trade.instrumentId,
           strategyId,
+          strategyVersionId: trade.strategyVersionId ?? null,
           originatingStrategyRunId: trade.strategyRunId ?? null,
           originatingStrategyCandidateSnapshotId: trade.strategyCandidateSnapshotId ?? null,
           openedAt: trade.tradeDate,
@@ -189,6 +192,7 @@ function toImmutableEpisode(episode: MutableEpisode): Omit<ReconstructedEpisode,
     companyId: episode.companyId,
     instrumentId: episode.instrumentId,
     strategyId: episode.strategyId,
+    strategyVersionId: episode.strategyVersionId,
     originatingStrategyRunId: episode.originatingStrategyRunId,
     originatingStrategyCandidateSnapshotId: episode.originatingStrategyCandidateSnapshotId,
     openedAt: episode.openedAt,
@@ -200,6 +204,7 @@ function toImmutableEpisode(episode: MutableEpisode): Omit<ReconstructedEpisode,
     entrySnapshot: {
       firstBuyTradeId: episode.firstBuyTradeId,
       originatingStrategyRunId: episode.originatingStrategyRunId,
+      strategyVersionId: episode.strategyVersionId,
       originatingStrategyCandidateSnapshotId: episode.originatingStrategyCandidateSnapshotId,
     },
     exitRecommendationSnapshotId: episode.exitRecommendationSnapshotId,

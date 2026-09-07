@@ -67,6 +67,7 @@ export function evaluateStrategy(
   config: StrategyConfig,
   runDate: Date,
   snapshot: StrategyMarketSnapshot,
+  options: { readonly activeHoldingCompanyIds?: ReadonlySet<string> } = {},
 ): StrategyEvaluationResult {
   const targets = getStandardMetricDateTargets(runDate);
   const pricesByInstrumentId = groupPrices(snapshot.prices);
@@ -90,8 +91,12 @@ export function evaluateStrategy(
       const rightValue = right.rankingMetricValue ?? 0;
       return config.ranking.direction === "asc" ? leftValue - rightValue : rightValue - leftValue;
     });
+  const activeHoldingCompanyIds = options.activeHoldingCompanyIds ?? new Set<string>();
   const selectedIds = new Set(
-    qualified.slice(0, config.selection.maxPositions).map((candidate) => candidate.companyId),
+    qualified
+      .filter((candidate) => !activeHoldingCompanyIds.has(candidate.companyId))
+      .slice(0, config.selection.maxPositions)
+      .map((candidate) => candidate.companyId),
   );
   const ranksByCompanyId = new Map(
     qualified.map((candidate, index) => [candidate.companyId, index + 1]),

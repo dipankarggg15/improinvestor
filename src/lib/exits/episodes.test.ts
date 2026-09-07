@@ -48,6 +48,35 @@ describe("reconstructPositionEpisodes", () => {
     expect(episodes[1]?.firstBuyTradeId).toBe("buy-2");
   });
 
+  it("assigns strategy version from the first buy and keeps it for the continuous episode", () => {
+    const episodes = reconstructPositionEpisodes({
+      strategyIdByPortfolioId,
+      trades: [
+        { ...trade("buy-1", "BUY", "2025-01-01", "5", "100"), strategyVersionId: "version-1" },
+        { ...trade("buy-2", "BUY", "2025-01-10", "3", "120"), strategyVersionId: "version-2" },
+        trade("sell-1", "SELL", "2025-02-01", "4", "130"),
+      ],
+    });
+
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0]?.status).toBe("OPEN");
+    expect(episodes[0]?.strategyVersionId).toBe("version-1");
+    expect(episodes[0]?.entrySnapshot).toMatchObject({ strategyVersionId: "version-1" });
+  });
+
+  it("keeps later episodes independently attributable after full closure", () => {
+    const episodes = reconstructPositionEpisodes({
+      strategyIdByPortfolioId,
+      trades: [
+        { ...trade("buy-1", "BUY", "2025-01-01", "5", "100"), strategyVersionId: "version-1" },
+        trade("sell-1", "SELL", "2025-02-01", "5", "110"),
+        { ...trade("buy-2", "BUY", "2025-03-01", "3", "90"), strategyVersionId: "version-2" },
+      ],
+    });
+
+    expect(episodes.map((episode) => episode.strategyVersionId)).toEqual(["version-1", "version-2"]);
+  });
+
   it("preserves review recommendation evidence separately from execution", () => {
     const reviewSnapshotsById = new Map<string, ReviewSnapshotReference>([
       [

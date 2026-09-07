@@ -16,13 +16,16 @@ describe("portfolio persistence schema", () => {
 
   it("links trades to strategy selections without making signals become positions", () => {
     expect(schema).toContain("strategyRunId               String?");
+    expect(schema).toContain("strategyVersionId           String?");
     expect(schema).toContain("strategyCandidateSnapshotId String?");
+    expect(schema).toContain("strategyVersion             StrategyVersion?");
     expect(schema).toContain("strategyCandidateSnapshot   StrategyCandidateSnapshot?");
   });
 
   it("indexes portfolio ledger and strategy source lookups", () => {
     expect(schema).toContain("@@index([portfolioId, tradeDate])");
     expect(schema).toContain("@@index([strategyRunId])");
+    expect(schema).toContain("@@index([strategyVersionId])");
     expect(schema).toContain("@@index([strategyCandidateSnapshotId])");
   });
 });

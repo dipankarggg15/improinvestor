@@ -1,11 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { cloneStrategyVersionAction, runStrategyAction } from "@/app/strategies/actions";
+import {
+  assignOpenEpisodeStrategyVersionAction,
+  cloneStrategyVersionAction,
+  runStrategyAction,
+} from "@/app/strategies/actions";
 import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
 import { prisma } from "@/lib/db/prisma";
 import { parseStrategyConfig } from "@/lib/strategies/config";
-import { formatDate } from "@/lib/ui/format";
+import { listStrategyLiveHoldings } from "@/lib/strategies/live-holdings";
+import { formatCurrency, formatDate, formatPercent } from "@/lib/ui/format";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +32,28 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
 
   const currentVersion = strategy.versions[0];
   const config = currentVersion ? parseStrategyConfig(currentVersion.config) : null;
+  const [currentHoldings, unassignedOpenEpisodes] = await Promise.all([
+    currentVersion
+      ? listStrategyLiveHoldings({
+          client: prisma,
+          strategyId: strategy.id,
+          strategyVersionId: currentVersion.id,
+          asOfDate: new Date(),
+        })
+      : Promise.resolve([]),
+    prisma.positionEpisode.findMany({
+      where: {
+        strategyId: strategy.id,
+        strategyVersionId: null,
+        status: "OPEN",
+      },
+      orderBy: { openedAt: "asc" },
+      include: {
+        company: { select: { name: true } },
+        instrument: { select: { symbol: true, exchange: true } },
+      },
+    }),
+  ]);
 
   return (
     <section className="px-5 py-6 sm:px-8 lg:px-10">
@@ -89,6 +116,74 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
             ))}
           </div>
         </div>
+
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Current Holdings</h2>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                {currentVersion ? `V${currentVersion.versionNumber} target ${config?.selection.maxPositions ?? 10}: ${currentHoldings.length} held, ${Math.max((config?.selection.maxPositions ?? 10) - currentHoldings.length, 0)} vacancies` : "No current version."}
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[980px] text-left text-sm">
+              <thead className="text-xs uppercase text-[var(--muted)]">
+                <tr>
+                  {["Stock", "Entry Date", "Avg Entry Price", "Current Price", "Return", "Entry Rank", "Current Rank", "Status"].map((head) => (
+                    <th className="py-2 pr-3" key={head}>{head}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {currentHoldings.map((holding) => (
+                  <tr className="border-t border-[var(--border)]" key={holding.episodeId}>
+                    <td className="py-3 pr-3">
+                      <span className="font-medium">{holding.companyName}</span>
+                      <span className="ml-2 text-xs text-[var(--muted)]">{holding.symbol} {holding.exchange}</span>
+                    </td>
+                    <td className="py-3 pr-3">{formatDate(holding.entryDate)}</td>
+                    <td className="py-3 pr-3">{formatCurrency(holding.averageEntryPrice.toNumber())}</td>
+                    <td className="py-3 pr-3">
+                      {holding.currentPrice ? `${formatCurrency(holding.currentPrice.toNumber())} (${holding.priceDate ? formatDate(holding.priceDate) : "-"})` : "-"}
+                    </td>
+                    <td className="py-3 pr-3">{formatPercent(holding.returnPercent?.toNumber())}</td>
+                    <td className="py-3 pr-3">{holding.entryRank ?? "-"}</td>
+                    <td className="py-3 pr-3">{holding.currentRank ?? "-"}</td>
+                    <td className="py-3 pr-3">{holding.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {currentHoldings.length === 0 ? <p className="mt-3 text-sm text-[var(--muted)]">No live holdings are assigned to this version.</p> : null}
+        </div>
+
+        {currentVersion && unassignedOpenEpisodes.length > 0 ? (
+          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+            <h2 className="text-lg font-semibold">Unassigned Open Holdings</h2>
+            <div className="mt-4 grid gap-2 text-sm">
+              {unassignedOpenEpisodes.map((episode) => (
+                <form className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-[var(--panel-soft)] px-3 py-2" action={assignOpenEpisodeStrategyVersionAction} key={episode.id}>
+                  <input name="strategyId" type="hidden" value={strategy.id} />
+                  <input name="episodeId" type="hidden" value={episode.id} />
+                  <input name="strategyVersionId" type="hidden" value={currentVersion.id} />
+                  <span>
+                    <span className="font-medium">{episode.company.name}</span>
+                    <span className="ml-2 text-xs text-[var(--muted)]">{episode.instrument.symbol} {episode.instrument.exchange}</span>
+                  </span>
+                  <ConfirmSubmitButton
+                    className="h-9 rounded-md border border-[var(--border)] px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                    confirmMessage={`Assign this open holding to ${strategy.name} V${currentVersion.versionNumber}?`}
+                    pendingLabel="Assigning..."
+                  >
+                    Assign to V{currentVersion.versionNumber}
+                  </ConfirmSubmitButton>
+                </form>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
           <h2 className="text-lg font-semibold">Historical Runs</h2>

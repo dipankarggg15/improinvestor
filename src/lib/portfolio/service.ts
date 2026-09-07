@@ -14,13 +14,14 @@ export type RecordTradeInput = {
   readonly fees: string;
   readonly notes?: string | null;
   readonly strategyRunId?: string | null;
+  readonly strategyVersionId?: string | null;
   readonly strategyCandidateSnapshotId?: string | null;
   readonly strategyReviewPositionSnapshotId?: string | null;
 };
 
 export async function recordTrade(client: PrismaClient, input: RecordTradeInput) {
   return client.$transaction(async (tx) => {
-    const [portfolio, instrument, candidateSnapshot, strategyRun, reviewSnapshot, existingTrades] = await Promise.all([
+    const [portfolio, instrument, candidateSnapshot, strategyRun, selectedStrategyVersion, reviewSnapshot, openEpisode, existingTrades] = await Promise.all([
       tx.portfolio.findUniqueOrThrow({
         where: { id: input.portfolioId },
         include: { strategy: true },
@@ -37,12 +38,24 @@ export async function recordTrade(client: PrismaClient, input: RecordTradeInput)
       input.strategyRunId
         ? tx.strategyRun.findUniqueOrThrow({ where: { id: input.strategyRunId } })
         : Promise.resolve(null),
+      input.strategyVersionId
+        ? tx.strategyVersion.findUniqueOrThrow({ where: { id: input.strategyVersionId } })
+        : Promise.resolve(null),
       input.strategyReviewPositionSnapshotId
         ? tx.strategyReviewPositionSnapshot.findUniqueOrThrow({
             where: { id: input.strategyReviewPositionSnapshotId },
             include: { review: true },
           })
         : Promise.resolve(null),
+      tx.positionEpisode.findFirst({
+        where: {
+          portfolioId: input.portfolioId,
+          companyId: input.companyId,
+          instrumentId: input.instrumentId,
+          status: "OPEN",
+        },
+        select: { id: true, strategyVersionId: true },
+      }),
       tx.trade.findMany({
         where: { portfolioId: input.portfolioId },
         orderBy: [{ tradeDate: "asc" }, { createdAt: "asc" }],
@@ -58,6 +71,9 @@ export async function recordTrade(client: PrismaClient, input: RecordTradeInput)
     if (sourceRun && sourceRun.strategyId !== portfolio.strategyId) {
       throw new Error("Strategy run does not belong to the portfolio strategy.");
     }
+    if (selectedStrategyVersion && selectedStrategyVersion.strategyId !== portfolio.strategyId) {
+      throw new Error("Strategy version does not belong to the portfolio strategy.");
+    }
 
     if (candidateSnapshot) {
       if (candidateSnapshot.strategyRunId !== sourceRun?.id) {
@@ -70,6 +86,12 @@ export async function recordTrade(client: PrismaClient, input: RecordTradeInput)
         throw new Error("Strategy-sourced BUY must reference a selected candidate snapshot.");
       }
     }
+
+    const strategyVersionId = openEpisode
+      ? openEpisode.strategyVersionId
+      : input.side === "BUY"
+        ? selectedStrategyVersion?.id ?? sourceRun?.strategyVersionId ?? null
+        : null;
 
     if (reviewSnapshot) {
       if (reviewSnapshot.review.portfolioId !== portfolio.id) {
@@ -87,6 +109,7 @@ export async function recordTrade(client: PrismaClient, input: RecordTradeInput)
       ...input,
       id: "zzzz-pending-new-trade",
       strategyRunId: sourceRun?.id ?? null,
+      strategyVersionId,
       quantity: decimal(input.quantity),
       price: decimal(input.price),
       fees: decimal(input.fees),
@@ -100,6 +123,7 @@ export async function recordTrade(client: PrismaClient, input: RecordTradeInput)
         companyId: input.companyId,
         instrumentId: input.instrumentId,
         strategyRunId: sourceRun?.id ?? null,
+        strategyVersionId,
         strategyCandidateSnapshotId: input.strategyCandidateSnapshotId ?? null,
         side: input.side,
         tradeDate: input.tradeDate,

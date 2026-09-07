@@ -69,8 +69,20 @@ export async function runStrategyVersion(input: {
     },
   });
   const config = parseStrategyConfig(version.config);
-  const snapshot = await loadStrategyMarketSnapshot(client, config, input.runDate);
-  const evaluation = evaluateStrategy(config, input.runDate, snapshot);
+  const [snapshot, activeHoldings] = await Promise.all([
+    loadStrategyMarketSnapshot(client, config, input.runDate),
+    client.positionEpisode.findMany({
+      where: {
+        strategyVersionId: input.strategyVersionId,
+        openedAt: { lte: input.runDate },
+        OR: [{ closedAt: null }, { closedAt: { gt: input.runDate } }],
+      },
+      select: { companyId: true },
+    }),
+  ]);
+  const evaluation = evaluateStrategy(config, input.runDate, snapshot, {
+    activeHoldingCompanyIds: new Set(activeHoldings.map((holding) => holding.companyId)),
+  });
 
   return client.$transaction(async (tx) => {
     const run = await tx.strategyRun.create({

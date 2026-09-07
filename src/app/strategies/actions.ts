@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { requireOwner } from "@/lib/auth/server";
 import { prisma } from "@/lib/db/prisma";
+import { assignOpenEpisodeToStrategyVersion } from "@/lib/strategies/live-holdings";
 import { createNextStrategyVersion, runCurrentStrategyVersion } from "@/lib/strategies/run-service";
 
 export async function runStrategyAction(formData: FormData) {
@@ -43,6 +44,25 @@ export async function cloneStrategyVersionAction(formData: FormData) {
     label: `V${latest.versionNumber + 1}`,
     effectiveFrom: new Date(),
     notes: "Copied from previous version. Edit support will be added in a later UI pass.",
+  });
+
+  redirect(`/strategies/${strategyId}`);
+}
+
+export async function assignOpenEpisodeStrategyVersionAction(formData: FormData) {
+  await requireOwner();
+
+  const strategyId = String(formData.get("strategyId") ?? "");
+  const episodeId = String(formData.get("episodeId") ?? "");
+  const strategyVersionId = String(formData.get("strategyVersionId") ?? "");
+  if (!strategyId || !episodeId || !strategyVersionId) {
+    throw new Error("Strategy, holding, and strategy version are required.");
+  }
+
+  await assignOpenEpisodeToStrategyVersion({
+    client: prisma,
+    episodeId,
+    strategyVersionId,
   });
 
   redirect(`/strategies/${strategyId}`);
