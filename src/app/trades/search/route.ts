@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireOwner } from "@/lib/auth/server";
 import { prisma } from "@/lib/db/prisma";
 import { decimal } from "@/lib/portfolio/accounting";
+import { normalizeStockSearchText, rankStockSearchCandidates, stockSearchPrefilterTerms } from "@/lib/stocks/fuzzy-search";
 
 export const dynamic = "force-dynamic";
 
@@ -23,16 +24,16 @@ export async function GET(request: Request) {
 }
 
 async function searchEligibleInstruments(query: string) {
+  const normalizedQuery = normalizeStockSearchText(query);
+  const queryTokens = normalizedQuery.split(" ").filter(Boolean);
+  if (queryTokens.length === 0) return [];
   const instruments = await prisma.instrument.findMany({
     where: {
       active: true,
-      OR: [
-        { symbol: { contains: query, mode: "insensitive" } },
-        { company: { name: { contains: query, mode: "insensitive" } } },
-      ],
+      OR: tokenFilters(queryTokens),
     },
     orderBy: [{ company: { name: "asc" } }, { exchange: "desc" }, { symbol: "asc" }],
-    take: 50,
+    take: 1_000,
     select: {
       id: true,
       companyId: true,
@@ -47,36 +48,47 @@ async function searchEligibleInstruments(query: string) {
     byCompany.set(instrument.companyId, [...(byCompany.get(instrument.companyId) ?? []), instrument]);
   }
 
-  return [...byCompany.values()]
+  const canonical = [...byCompany.values()]
     .map((companyInstruments) => (
       companyInstruments.find((instrument) => instrument.exchange === "NSE")
       ?? companyInstruments.find((instrument) => instrument.exchange === "BSE")
       ?? companyInstruments[0]
     ))
-    .filter((instrument): instrument is NonNullable<typeof instrument> => Boolean(instrument))
-    .slice(0, 20)
-    .map((instrument) => ({
-      key: `${instrument.companyId}:${instrument.id}`,
-      portfolioId: null,
+    .filter((instrument): instrument is NonNullable<typeof instrument> => Boolean(instrument));
+
+  return rankStockSearchCandidates(
+    query,
+    canonical.map((instrument) => ({
       companyId: instrument.companyId,
       instrumentId: instrument.id,
       companyName: instrument.company.name,
+      symbol: instrument.symbol,
+      exchange: instrument.exchange,
+    })),
+    20,
+  )
+    .map((instrument) => ({
+      key: `${instrument.companyId}:${instrument.instrumentId}`,
+      portfolioId: null,
+      companyId: instrument.companyId,
+      instrumentId: instrument.instrumentId,
+      companyName: instrument.companyName,
       symbol: instrument.symbol,
       exchange: instrument.exchange,
     }));
 }
 
 async function searchOpenHoldings(query: string) {
+  const normalizedQuery = normalizeStockSearchText(query);
+  const queryTokens = normalizedQuery.split(" ").filter(Boolean);
+  if (queryTokens.length === 0) return [];
   const episodes = await prisma.positionEpisode.findMany({
     where: {
       status: "OPEN",
-      OR: [
-        { company: { name: { contains: query, mode: "insensitive" } } },
-        { instrument: { symbol: { contains: query, mode: "insensitive" } } },
-      ],
+      OR: tokenFilters(queryTokens),
     },
     orderBy: [{ openedAt: "asc" }, { createdAt: "asc" }],
-    take: 20,
+    take: 1_000,
     select: {
       portfolioId: true,
       companyId: true,
@@ -93,7 +105,7 @@ async function searchOpenHoldings(query: string) {
     },
   });
 
-  return episodes
+  const holdings = episodes
     .map((episode) => {
       const quantity = episode.trades.reduce(
         (sum, trade) => trade.side === "BUY" ? sum.plus(trade.quantity) : sum.minus(trade.quantity),
@@ -115,4 +127,15 @@ async function searchOpenHoldings(query: string) {
       };
     })
     .filter((episode) => decimal(episode.availableQuantity).gt(0));
+
+  return rankStockSearchCandidates(query, holdings, 20);
+}
+
+function tokenFilters(tokens: readonly string[]) {
+  const terms = stockSearchPrefilterTerms(tokens.join(" "));
+
+  return terms.flatMap((token) => [
+    { symbol: { contains: token, mode: "insensitive" as const } },
+    { company: { name: { contains: token, mode: "insensitive" as const } } },
+  ]);
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db/prisma";
+import { normalizeStockSearchText, rankStockSearchCandidates, stockSearchPrefilterTerms } from "@/lib/stocks/fuzzy-search";
 import { formatCurrency, formatDate, formatQuantity } from "@/lib/ui/format";
 
 export const dynamic = "force-dynamic";
@@ -15,17 +16,11 @@ export default async function TradesPage({ searchParams }: TradesPageProps) {
   const side = query.side === "BUY" || query.side === "SELL" ? query.side : undefined;
   const strategy = query.strategy || undefined;
   const stock = query.stock?.trim() || undefined;
+  const stockMatchWhere = stock ? await tradeHistoryStockWhere(stock) : {};
   const where: Prisma.TradeWhereInput = {
     side,
     AND: [
-      stock
-        ? {
-            OR: [
-              { company: { name: { contains: stock, mode: "insensitive" } } },
-              { instrument: { symbol: { contains: stock, mode: "insensitive" } } },
-            ],
-          }
-        : {},
+      stockMatchWhere,
       strategy === "unassigned"
         ? {
             strategyVersionId: null,
@@ -154,6 +149,54 @@ export default async function TradesPage({ searchParams }: TradesPageProps) {
       </div>
     </section>
   );
+}
+
+async function tradeHistoryStockWhere(stock: string): Promise<Prisma.TradeWhereInput> {
+  const normalizedQuery = normalizeStockSearchText(stock);
+  const tokens = normalizedQuery.split(" ").filter(Boolean);
+  if (tokens.length === 0) return {};
+
+  const instruments = await prisma.instrument.findMany({
+    where: { OR: tokenFilters(tokens) },
+    orderBy: [{ company: { name: "asc" } }, { exchange: "desc" }, { symbol: "asc" }],
+    take: 1_000,
+    select: {
+      id: true,
+      companyId: true,
+      exchange: true,
+      symbol: true,
+      company: { select: { name: true } },
+    },
+  });
+  const matches = rankStockSearchCandidates(
+    stock,
+    instruments.map((instrument) => ({
+      companyId: instrument.companyId,
+      instrumentId: instrument.id,
+      companyName: instrument.company.name,
+      symbol: instrument.symbol,
+      exchange: instrument.exchange,
+    })),
+    100,
+  );
+
+  if (matches.length === 0) return { id: "__no_stock_match__" };
+
+  return {
+    OR: [
+      { companyId: { in: [...new Set(matches.map((match) => match.companyId))] } },
+      { instrumentId: { in: [...new Set(matches.map((match) => match.instrumentId))] } },
+    ],
+  };
+}
+
+function tokenFilters(tokens: readonly string[]) {
+  const terms = stockSearchPrefilterTerms(tokens.join(" "));
+
+  return terms.flatMap((token) => [
+    { symbol: { contains: token, mode: "insensitive" as const } },
+    { company: { name: { contains: token, mode: "insensitive" as const } } },
+  ]);
 }
 
 function strategyLabel(trade: {
