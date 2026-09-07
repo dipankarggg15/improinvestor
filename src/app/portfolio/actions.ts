@@ -10,9 +10,12 @@ import { recordTrade } from "@/lib/portfolio/service";
 export async function recordTradeAction(formData: FormData) {
   await requireOwner();
 
-  const portfolioId = String(formData.get("portfolioId") ?? "");
   const stockKey = nullableString(formData.get("stockKey"));
-  const [stockCompanyId, stockInstrumentId] = stockKey?.split(":") ?? [];
+  const stockParts = stockKey?.split(":") ?? [];
+  const [stockPortfolioId, stockCompanyId, stockInstrumentId] = stockParts.length === 3
+    ? stockParts
+    : [null, stockParts[0], stockParts[1]];
+  const portfolioId = stockPortfolioId || String(formData.get("portfolioId") ?? "");
   const companyId = stockCompanyId || String(formData.get("companyId") ?? "");
   const instrumentId = stockInstrumentId || String(formData.get("instrumentId") ?? "");
   const strategyRunId = nullableString(formData.get("strategyRunId"));

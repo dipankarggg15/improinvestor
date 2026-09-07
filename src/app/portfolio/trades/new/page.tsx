@@ -43,13 +43,15 @@ export default async function NewTradePage({ searchParams }: NewTradePageProps) 
   const portfolio = reviewSnapshot?.review.portfolio ?? (
     portfolioId
       ? await prisma.portfolio.findUnique({ where: { id: portfolioId } })
-      : await prisma.portfolio.findFirst({
-          where: { strategyId: snapshot?.strategyRun.strategyId },
-          orderBy: { inceptionDate: "asc" },
-        })
+      : snapshot
+        ? await prisma.portfolio.findFirst({
+            where: { strategyId: snapshot.strategyRun.strategyId },
+            orderBy: { inceptionDate: "asc" },
+          })
+        : null
   );
 
-  if (!portfolio) notFound();
+  if (!portfolio && (snapshot || reviewSnapshot || portfolioId)) notFound();
   const strategyVersions = await prisma.strategyVersion.findMany({
     where: { strategy: { status: "ACTIVE" } },
     orderBy: { versionNumber: "desc" },
@@ -58,27 +60,35 @@ export default async function NewTradePage({ searchParams }: NewTradePageProps) 
   const defaultStrategyVersionId = snapshot?.strategyRun.strategyVersionId ?? "";
 
   if (!snapshot && !reviewSnapshot) {
-    const [instruments, valuation] = await Promise.all([
+    const portfolios = await prisma.portfolio.findMany({
+      orderBy: { name: "asc" },
+      include: { strategy: true },
+    });
+    const [instruments, valuations] = await Promise.all([
       prisma.instrument.findMany({
         where: { active: true },
         orderBy: [{ company: { name: "asc" } }, { exchange: "asc" }],
         include: { company: true },
       }),
-      valuePortfolioAsOf(prisma, portfolio.id, new Date()),
+      portfolio
+        ? Promise.all([valuePortfolioAsOf(prisma, portfolio.id, new Date())])
+        : Promise.all(portfolios.map((item) => valuePortfolioAsOf(prisma, item.id, new Date()))),
     ]);
     const instrumentById = new Map(instruments.map((instrument) => [instrument.id, instrument]));
 
     return (
       <ManualPortfolioTradePage
         instruments={instruments}
-        openPositions={valuation.positions.map((position) => ({
+        openPositions={valuations.flatMap((valuation) => valuation.positions.map((position) => ({
+          portfolioId: valuation.portfolio.id,
           companyId: position.companyId,
           instrumentId: position.instrumentId,
           companyName: instrumentById.get(position.instrumentId)?.company.name ?? position.companyId,
           symbol: instrumentById.get(position.instrumentId)?.symbol ?? position.instrumentId,
           exchange: instrumentById.get(position.instrumentId)?.exchange ?? "",
-        }))}
-        portfolioId={portfolio.id}
+        })))}
+        portfolioId={portfolio?.id ?? null}
+        portfolios={portfolios}
         strategyVersions={strategyVersions}
       />
     );
@@ -88,6 +98,7 @@ export default async function NewTradePage({ searchParams }: NewTradePageProps) 
   const companyId = reviewSnapshot?.companyId ?? snapshot?.companyId;
   const defaultDate = reviewSnapshot?.review.reviewDate ?? snapshot?.strategyRun.runDate;
   if (!instrumentId || !companyId || !defaultDate) notFound();
+  if (!portfolio) notFound();
   const defaultPrice = await getDefaultTradePrice(prisma, instrumentId, defaultDate);
   const tradeDate = defaultPrice?.tradingDate ?? defaultDate;
   const price = defaultPrice?.close.toNumber() ?? 0;
@@ -190,6 +201,7 @@ type ManualInstrument = Awaited<ReturnType<typeof prisma.instrument.findMany>>[n
   readonly company: { readonly id: string; readonly name: string };
 };
 type ManualOpenPosition = {
+  readonly portfolioId: string;
   readonly companyId: string;
   readonly instrumentId: string;
   readonly companyName: string;
@@ -201,14 +213,17 @@ function ManualPortfolioTradePage({
   instruments,
   openPositions,
   portfolioId,
+  portfolios,
   strategyVersions,
 }: {
   readonly instruments: ManualInstrument[];
   readonly openPositions: ManualOpenPosition[];
-  readonly portfolioId: string;
+  readonly portfolioId: string | null;
+  readonly portfolios: Array<{ readonly id: string; readonly name: string; readonly strategy: { readonly name: string } }>;
   readonly strategyVersions: Array<{ readonly id: string; readonly versionNumber: number; readonly label: string | null; readonly strategy: { readonly name: string } }>;
 }) {
   const today = formatDate(new Date());
+  const activePortfolioId = portfolioId ?? portfolios[0]?.id ?? "";
 
   return (
     <section className="px-5 py-6 sm:px-8 lg:px-10">
@@ -222,10 +237,14 @@ function ManualPortfolioTradePage({
         </div>
 
         <form action={recordTradeAction} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
-          <input name="portfolioId" type="hidden" value={portfolioId} />
           <input name="side" type="hidden" value="BUY" />
           <h2 className="text-lg font-semibold">Buy</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            {portfolioId ? (
+              <input name="portfolioId" type="hidden" value={portfolioId} />
+            ) : (
+              <PortfolioSelect defaultValue={activePortfolioId} portfolios={portfolios} />
+            )}
             <StockSelect instruments={instruments} />
             <TradeDateField defaultValue={today} />
             <NumberField label="Quantity" min="0.000001" name="quantity" step="0.000001" />
@@ -257,7 +276,7 @@ function ManualPortfolioTradePage({
         </form>
 
         <form action={recordTradeAction} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
-          <input name="portfolioId" type="hidden" value={portfolioId} />
+          <input name="portfolioId" type="hidden" value={activePortfolioId} />
           <input name="side" type="hidden" value="SELL" />
           <input name="strategyVersionId" type="hidden" value="" />
           <h2 className="text-lg font-semibold">Sell From Open Position</h2>
@@ -266,7 +285,7 @@ function ManualPortfolioTradePage({
               Stock
               <select className="h-11 rounded-md border border-[var(--border)] px-3" name="stockKey" required>
                 {openPositions.map((position) => (
-                  <option key={`${position.companyId}:${position.instrumentId}`} value={`${position.companyId}:${position.instrumentId}`}>
+                  <option key={`${position.portfolioId}:${position.companyId}:${position.instrumentId}`} value={`${position.portfolioId}:${position.companyId}:${position.instrumentId}`}>
                     {position.companyName} - {position.symbol} {position.exchange}
                   </option>
                 ))}
@@ -290,6 +309,27 @@ function ManualPortfolioTradePage({
         </form>
       </div>
     </section>
+  );
+}
+
+function PortfolioSelect({
+  defaultValue,
+  portfolios,
+}: {
+  readonly defaultValue: string;
+  readonly portfolios: Array<{ readonly id: string; readonly name: string; readonly strategy: { readonly name: string } }>;
+}) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      Ledger
+      <select className="h-11 rounded-md border border-[var(--border)] px-3" defaultValue={defaultValue} name="portfolioId" required>
+        {portfolios.map((portfolio) => (
+          <option key={portfolio.id} value={portfolio.id}>
+            {portfolio.name} - {portfolio.strategy.name}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 

@@ -8,7 +8,7 @@ const navigationItems = [
   { label: "Dashboard", href: "/" },
   { label: "Strategies", href: "/strategies" },
   { label: "Portfolio", href: "/portfolio" },
-  { label: "Stocks", href: "/stocks" },
+  { label: "Trades", href: "/trades" },
   { label: "Screener", href: "/screener" },
   { label: "Analytics", href: "/analytics" },
   { label: "Research", href: "/research/counterfactuals" },
