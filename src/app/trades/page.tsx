@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db/prisma";
-import { normalizeStockSearchText, rankStockSearchCandidates, stockSearchPrefilterTerms } from "@/lib/stocks/fuzzy-search";
+import { normalizeStockSearchText, rankStockSearchCandidates } from "@/lib/stocks/fuzzy-search";
 import { formatCurrency, formatDate, formatQuantity } from "@/lib/ui/format";
 
 export const dynamic = "force-dynamic";
@@ -153,13 +153,13 @@ export default async function TradesPage({ searchParams }: TradesPageProps) {
 
 async function tradeHistoryStockWhere(stock: string): Promise<Prisma.TradeWhereInput> {
   const normalizedQuery = normalizeStockSearchText(stock);
-  const tokens = normalizedQuery.split(" ").filter(Boolean);
-  if (tokens.length === 0) return {};
+  if (normalizedQuery.length < 2) return {};
 
   const instruments = await prisma.instrument.findMany({
-    where: { OR: tokenFilters(tokens) },
+    where: {
+      trades: { some: {} },
+    },
     orderBy: [{ company: { name: "asc" } }, { exchange: "desc" }, { symbol: "asc" }],
-    take: 1_000,
     select: {
       id: true,
       companyId: true,
@@ -188,15 +188,6 @@ async function tradeHistoryStockWhere(stock: string): Promise<Prisma.TradeWhereI
       { instrumentId: { in: [...new Set(matches.map((match) => match.instrumentId))] } },
     ],
   };
-}
-
-function tokenFilters(tokens: readonly string[]) {
-  const terms = stockSearchPrefilterTerms(tokens.join(" "));
-
-  return terms.flatMap((token) => [
-    { symbol: { contains: token, mode: "insensitive" as const } },
-    { company: { name: { contains: token, mode: "insensitive" as const } } },
-  ]);
 }
 
 function strategyLabel(trade: {

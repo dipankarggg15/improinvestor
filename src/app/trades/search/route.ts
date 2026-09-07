@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { requireOwner } from "@/lib/auth/server";
 import { prisma } from "@/lib/db/prisma";
 import { decimal } from "@/lib/portfolio/accounting";
-import { normalizeStockSearchText, rankStockSearchCandidates, stockSearchPrefilterTerms } from "@/lib/stocks/fuzzy-search";
+import { normalizeStockSearchText, rankStockSearchCandidates } from "@/lib/stocks/fuzzy-search";
 
 export const dynamic = "force-dynamic";
 
@@ -25,15 +25,10 @@ export async function GET(request: Request) {
 
 async function searchEligibleInstruments(query: string) {
   const normalizedQuery = normalizeStockSearchText(query);
-  const queryTokens = normalizedQuery.split(" ").filter(Boolean);
-  if (queryTokens.length === 0) return [];
+  if (normalizedQuery.length < 2) return [];
   const instruments = await prisma.instrument.findMany({
-    where: {
-      active: true,
-      OR: tokenFilters(queryTokens),
-    },
+    where: { active: true },
     orderBy: [{ company: { name: "asc" } }, { exchange: "desc" }, { symbol: "asc" }],
-    take: 1_000,
     select: {
       id: true,
       companyId: true,
@@ -80,15 +75,10 @@ async function searchEligibleInstruments(query: string) {
 
 async function searchOpenHoldings(query: string) {
   const normalizedQuery = normalizeStockSearchText(query);
-  const queryTokens = normalizedQuery.split(" ").filter(Boolean);
-  if (queryTokens.length === 0) return [];
+  if (normalizedQuery.length < 2) return [];
   const episodes = await prisma.positionEpisode.findMany({
-    where: {
-      status: "OPEN",
-      OR: tokenFilters(queryTokens),
-    },
+    where: { status: "OPEN" },
     orderBy: [{ openedAt: "asc" }, { createdAt: "asc" }],
-    take: 1_000,
     select: {
       portfolioId: true,
       companyId: true,
@@ -129,13 +119,4 @@ async function searchOpenHoldings(query: string) {
     .filter((episode) => decimal(episode.availableQuantity).gt(0));
 
   return rankStockSearchCandidates(query, holdings, 20);
-}
-
-function tokenFilters(tokens: readonly string[]) {
-  const terms = stockSearchPrefilterTerms(tokens.join(" "));
-
-  return terms.flatMap((token) => [
-    { symbol: { contains: token, mode: "insensitive" as const } },
-    { company: { name: { contains: token, mode: "insensitive" as const } } },
-  ]);
 }
