@@ -1,6 +1,11 @@
 import type { Exchange } from "@prisma/client";
 
 import type { PriceRepository } from "@/lib/research/price-repository";
+import {
+  calculateOneMonthReturn,
+  calculateOneWeekReturn,
+  calculateThreeMonthReturn,
+} from "@/lib/research/standard-returns";
 
 const crore = 10_000_000;
 
@@ -9,16 +14,15 @@ export type ScreenerSortKey =
   | "company"
   | "symbol"
   | "exchange"
-  | "requestedStartDate"
-  | "startDate"
-  | "startPrice"
-  | "requestedEndDate"
-  | "endDate"
-  | "endPrice"
+  | "currentPrice"
+  | "oneWeekReturnPercent"
+  | "oneMonthReturnPercent"
+  | "threeMonthReturnPercent"
   | "returnPercent"
   | "marketCap"
   | "debtToEquity"
-  | "averageTradedValue";
+  | "averageTradedValue"
+  | "peRatio";
 
 export type ScreenerSortDirection = "asc" | "desc";
 
@@ -48,7 +52,14 @@ export type ScreenerCandidate = {
 export type FundamentalsSnapshot = {
   readonly marketCap: number | null;
   readonly debtToEquity: number | null;
+  readonly peRatio: number | null;
   readonly asOfDate: Date;
+};
+
+export type ScreenerStandardReturns = {
+  readonly oneWeekReturnPercent: number | null;
+  readonly oneMonthReturnPercent: number | null;
+  readonly threeMonthReturnPercent: number | null;
 };
 
 export type ScreenerRow = {
@@ -65,10 +76,15 @@ export type ScreenerRow = {
   readonly actualEndDate: Date;
   readonly startClose: number;
   readonly endClose: number;
+  readonly currentPrice: number;
+  readonly oneWeekReturnPercent: number | null;
+  readonly oneMonthReturnPercent: number | null;
+  readonly threeMonthReturnPercent: number | null;
   readonly returnPercent: number;
   readonly marketCap: number;
   readonly debtToEquity: number;
   readonly averageTradedValue: number;
+  readonly peRatio: number | null;
 };
 
 export type ScreenerPeriodData = {
@@ -76,6 +92,7 @@ export type ScreenerPeriodData = {
   readonly endPricesByInstrumentId: Map<string, { readonly tradingDate: Date; readonly close: number }>;
   readonly averageTradedValueByInstrumentId: Map<string, number>;
   readonly fundamentalsByCompanyId: Map<string, FundamentalsSnapshot>;
+  readonly standardReturnsByInstrumentId: Map<string, ScreenerStandardReturns>;
 };
 
 export type ScreenerExclusionReason =
@@ -192,10 +209,13 @@ export async function runCustomReturnScreener(
       actualEndDate: endPrice.tradingDate,
       startClose: startPrice.close,
       endClose: endPrice.close,
+      currentPrice: endPrice.close,
+      ...(periodData.standardReturnsByInstrumentId.get(candidate.instrumentId) ?? emptyStandardReturns),
       returnPercent: ((endPrice.close / startPrice.close) - 1) * 100,
       marketCap: fundamentals.marketCap,
       debtToEquity: fundamentals.debtToEquity,
       averageTradedValue,
+      peRatio: fundamentals.peRatio,
     });
   }
 
@@ -208,7 +228,7 @@ export async function runCustomReturnScreener(
 
   return {
     ok: true,
-    rows: sortScreenerRows(rankedRows, input.sortBy ?? "returnPercent", input.sortDirection ?? "desc"),
+    rows: sortScreenerRows(rankedRows, input.sortBy ?? "rank", input.sortDirection ?? "asc"),
     exclusions,
   };
 }
@@ -224,6 +244,10 @@ export function sortScreenerRows(
     const leftValue = getSortValue(left, sortBy);
     const rightValue = getSortValue(right, sortBy);
 
+    if (leftValue === null && rightValue === null) return 0;
+    if (leftValue === null) return 1;
+    if (rightValue === null) return -1;
+
     if (typeof leftValue === "string" && typeof rightValue === "string") {
       return leftValue.localeCompare(rightValue) * multiplier;
     }
@@ -232,7 +256,31 @@ export function sortScreenerRows(
   });
 }
 
-function getSortValue(row: ScreenerRow, sortBy: ScreenerSortKey): string | number {
+export async function calculateStandardReturns(
+  repository: PriceRepository,
+  instrumentId: string,
+  endDate: Date,
+): Promise<ScreenerStandardReturns> {
+  const [oneWeek, oneMonth, threeMonths] = await Promise.all([
+    calculateOneWeekReturn(repository, { instrumentId, endDate }),
+    calculateOneMonthReturn(repository, { instrumentId, endDate }),
+    calculateThreeMonthReturn(repository, { instrumentId, endDate }),
+  ]);
+
+  return {
+    oneWeekReturnPercent: oneWeek?.returnPercent ?? null,
+    oneMonthReturnPercent: oneMonth?.returnPercent ?? null,
+    threeMonthReturnPercent: threeMonths?.returnPercent ?? null,
+  };
+}
+
+export const emptyStandardReturns: ScreenerStandardReturns = {
+  oneWeekReturnPercent: null,
+  oneMonthReturnPercent: null,
+  threeMonthReturnPercent: null,
+};
+
+function getSortValue(row: ScreenerRow, sortBy: ScreenerSortKey): string | number | null {
   switch (sortBy) {
     case "rank":
       return row.rank;
@@ -242,24 +290,22 @@ function getSortValue(row: ScreenerRow, sortBy: ScreenerSortKey): string | numbe
       return row.symbol;
     case "exchange":
       return row.exchange;
-    case "requestedStartDate":
-      return row.requestedStartDate.getTime();
-    case "startDate":
-      return row.actualStartDate.getTime();
-    case "startPrice":
-      return row.startClose;
-    case "requestedEndDate":
-      return row.requestedEndDate.getTime();
-    case "endDate":
-      return row.actualEndDate.getTime();
-    case "endPrice":
-      return row.endClose;
+    case "currentPrice":
+      return row.currentPrice;
+    case "oneWeekReturnPercent":
+      return row.oneWeekReturnPercent;
+    case "oneMonthReturnPercent":
+      return row.oneMonthReturnPercent;
+    case "threeMonthReturnPercent":
+      return row.threeMonthReturnPercent;
     case "marketCap":
       return row.marketCap;
     case "debtToEquity":
       return row.debtToEquity;
     case "averageTradedValue":
       return row.averageTradedValue;
+    case "peRatio":
+      return row.peRatio;
     case "returnPercent":
       return row.returnPercent;
   }

@@ -16,22 +16,23 @@ export const dynamic = "force-dynamic";
 const crore = 10_000_000;
 const defaultStartDate = "2025-03-03";
 const defaultEndDate = "2025-12-31";
-const sortableColumns: Partial<Record<string, ScreenerSortKey>> = {
-  Rank: "rank",
-  Company: "company",
-  Symbol: "symbol",
-  Exchange: "exchange",
-  "Requested Start": "requestedStartDate",
-  "Start Date Used": "startDate",
-  "Start Price": "startPrice",
-  "Requested End": "requestedEndDate",
-  "End Date Used": "endDate",
-  "End Price": "endPrice",
-  "Return %": "returnPercent",
-  "Market Cap": "marketCap",
-  "Debt/Equity": "debtToEquity",
-  "Average Traded Value": "averageTradedValue",
-};
+const sortableColumns: readonly {
+  readonly label: string;
+  readonly sortKey: ScreenerSortKey;
+  readonly title?: string;
+}[] = [
+  { label: "Rank", sortKey: "rank" },
+  { label: "Stock", sortKey: "company" },
+  { label: "Price", sortKey: "currentPrice", title: "Latest available close on or before the screener end date" },
+  { label: "Return", sortKey: "returnPercent", title: "Return over the selected screener start and end dates" },
+  { label: "1W", sortKey: "oneWeekReturnPercent", title: "One-week return as of the screener end date" },
+  { label: "1M", sortKey: "oneMonthReturnPercent", title: "One-month return as of the screener end date" },
+  { label: "3M", sortKey: "threeMonthReturnPercent", title: "Three-month return as of the screener end date" },
+  { label: "MCap", sortKey: "marketCap", title: "Market Capitalization" },
+  { label: "D/E", sortKey: "debtToEquity", title: "Debt to Equity" },
+  { label: "ATV/D", sortKey: "averageTradedValue", title: "Average Traded Value per Day" },
+  { label: "P/E", sortKey: "peRatio", title: "Price to Earnings" },
+] as const;
 
 type ScreenerPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -42,7 +43,7 @@ export default async function ScreenerPage({ searchParams }: ScreenerPageProps) 
   const formValues = parseFormValues(params);
   const hasRun = getParam(params, "run") === "1";
   const sortBy = parseSortKey(getParam(params, "sortBy"));
-  const sortDirection = parseSortDirection(getParam(params, "sortDirection"));
+  const sortDirection = parseSortDirection(getParam(params, "sortDirection"), sortBy);
   const validationError = validateDateRange(formValues.startDate, formValues.endDate);
   let result: ScreenerResult | null = null;
 
@@ -178,17 +179,18 @@ function Results({
       </div>
 
       <div className="overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel)] shadow-sm">
-        <table className="w-full min-w-[1380px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[920px] border-collapse text-left text-sm">
           <thead className="bg-[var(--panel-soft)] text-xs uppercase text-[var(--muted)]">
             <tr>
-              {Object.keys(sortableColumns).map((label) => (
-                <th className="border-b border-[var(--border)] px-3 py-3 font-semibold" key={label}>
+              {sortableColumns.map(({ label, sortKey, title }) => (
+                <th className="border-b border-[var(--border)] px-3 py-3 font-semibold" key={sortKey}>
                   <SortLink
                     currentDirection={sortDirection}
                     currentSort={sortBy}
                     label={label}
                     params={params}
-                    sortKey={sortableColumns[label] ?? "returnPercent"}
+                    sortKey={sortKey}
+                    title={title}
                   />
                 </th>
               ))}
@@ -200,20 +202,17 @@ function Results({
                 <td className="px-3 py-3 font-medium">{row.rank}</td>
                 <td className="px-3 py-3">
                   <span className="block font-medium text-[var(--foreground)]">{row.companyName}</span>
-                  <span className="text-xs text-[var(--muted)]">{row.isin}</span>
+                  <span className="text-xs text-[var(--muted)]">{row.exchange}:{row.symbol}</span>
                 </td>
-                <td className="px-3 py-3 font-medium">{row.symbol}</td>
-                <td className="px-3 py-3">{row.exchange}</td>
-                <td className="px-3 py-3">{formatDate(row.requestedStartDate)}</td>
-                <td className="px-3 py-3">{formatDate(row.actualStartDate)}</td>
-                <td className="px-3 py-3">{formatRupees(row.startClose)}</td>
-                <td className="px-3 py-3">{formatDate(row.requestedEndDate)}</td>
-                <td className="px-3 py-3">{formatDate(row.actualEndDate)}</td>
-                <td className="px-3 py-3">{formatRupees(row.endClose)}</td>
+                <td className="px-3 py-3 font-medium">{formatRupees(row.currentPrice)}</td>
                 <td className="px-3 py-3 font-semibold">{formatPercent(row.returnPercent)}</td>
+                <td className="px-3 py-3 font-semibold">{formatNullablePercent(row.oneWeekReturnPercent)}</td>
+                <td className="px-3 py-3 font-semibold">{formatNullablePercent(row.oneMonthReturnPercent)}</td>
+                <td className="px-3 py-3 font-semibold">{formatNullablePercent(row.threeMonthReturnPercent)}</td>
                 <td className="px-3 py-3">{formatCrores(row.marketCap)}</td>
                 <td className="px-3 py-3">{row.debtToEquity.toFixed(2)}</td>
-                <td className="px-3 py-3">{formatCrores(row.averageTradedValue)}/day</td>
+                <td className="px-3 py-3">{formatCrores(row.averageTradedValue)}</td>
+                <td className="px-3 py-3">{formatNullableRatio(row.peRatio)}</td>
               </tr>
             ))}
           </tbody>
@@ -278,12 +277,14 @@ function SortLink({
   label,
   params,
   sortKey,
+  title,
 }: {
   readonly currentDirection: ScreenerSortDirection;
   readonly currentSort: ScreenerSortKey;
   readonly label: string;
   readonly params: Record<string, string | string[] | undefined>;
   readonly sortKey: ScreenerSortKey;
+  readonly title?: string;
 }) {
   const isCurrent = currentSort === sortKey;
   const nextDirection: ScreenerSortDirection = isCurrent && currentDirection === "desc" ? "asc" : "desc";
@@ -300,7 +301,12 @@ function SortLink({
   nextParams.set("sortDirection", nextDirection);
 
   return (
-    <Link className="inline-flex items-center gap-1 hover:text-[var(--foreground)]" href={`/screener?${nextParams}`}>
+    <Link
+      aria-label={title ? `Sort by ${label}: ${title}` : `Sort by ${label}`}
+      className="inline-flex items-center gap-1 hover:text-[var(--foreground)]"
+      href={`/screener?${nextParams}`}
+      title={title}
+    >
       {label}
       {isCurrent ? <span>{currentDirection === "desc" ? "↓" : "↑"}</span> : null}
     </Link>
@@ -381,16 +387,13 @@ function toUtcDate(value: string) {
 }
 
 function parseSortKey(value: string | undefined): ScreenerSortKey {
-  const allowed = new Set(Object.values(sortableColumns));
-  return value && allowed.has(value as ScreenerSortKey) ? (value as ScreenerSortKey) : "returnPercent";
+  const allowed = new Set(sortableColumns.map((column) => column.sortKey));
+  return value && allowed.has(value as ScreenerSortKey) ? (value as ScreenerSortKey) : "rank";
 }
 
-function parseSortDirection(value: string | undefined): ScreenerSortDirection {
-  return value === "asc" ? "asc" : "desc";
-}
-
-function formatDate(date: Date) {
-  return date.toISOString().slice(0, 10);
+function parseSortDirection(value: string | undefined, sortBy: ScreenerSortKey): ScreenerSortDirection {
+  if (value === "asc" || value === "desc") return value;
+  return sortBy === "rank" || sortBy === "company" ? "asc" : "desc";
 }
 
 function formatRupees(value: number) {
@@ -401,9 +404,10 @@ function formatRupees(value: number) {
 }
 
 function formatCrores(value: number) {
-  return `₹${(value / crore).toLocaleString("en-IN", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
+  const valueInCrores = value / crore;
+  return `₹${valueInCrores.toLocaleString("en-IN", {
+    maximumFractionDigits: valueInCrores >= 100 ? 0 : 1,
+    minimumFractionDigits: valueInCrores >= 100 ? 0 : 1,
   })} Cr`;
 }
 
@@ -412,6 +416,19 @@ function formatPercent(value: number) {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
   })}%`;
+}
+
+function formatNullablePercent(value: number | null) {
+  return value === null ? "—" : formatPercent(value);
+}
+
+function formatNullableRatio(value: number | null) {
+  return value === null
+    ? "—"
+    : value.toLocaleString("en-IN", {
+        maximumFractionDigits: 2,
+        minimumFractionDigits: 2,
+      });
 }
 
 function formatExclusionReason(reason: ScreenerExclusionReason) {

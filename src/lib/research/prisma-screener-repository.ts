@@ -5,11 +5,13 @@ import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type { DailyClosePoint } from "@/lib/research/price-repository";
 import type {
+  ScreenerStandardReturns,
   FundamentalsSnapshot,
   ScreenerCandidate,
   ScreenerPeriodData,
   ScreenerRepository,
 } from "@/lib/research/screener";
+import { calculateStandardReturns } from "@/lib/research/screener";
 
 export class PrismaScreenerRepository implements ScreenerRepository {
   constructor(private readonly client: PrismaClient = prisma) {}
@@ -96,10 +98,12 @@ export class PrismaScreenerRepository implements ScreenerRepository {
     const instrumentsByCompany = new Map<string, typeof instruments>();
 
     for (const instrument of instruments) {
-      instrumentsByCompany.set(instrument.companyId, [
-        ...(instrumentsByCompany.get(instrument.companyId) ?? []),
-        instrument,
-      ]);
+      const companyInstruments = instrumentsByCompany.get(instrument.companyId);
+      if (companyInstruments) {
+        companyInstruments.push(instrument);
+      } else {
+        instrumentsByCompany.set(instrument.companyId, [instrument]);
+      }
     }
 
     return [...instrumentsByCompany.entries()]
@@ -150,6 +154,7 @@ export class PrismaScreenerRepository implements ScreenerRepository {
           asOfDate: fundamentals.asOfDate,
           marketCap: fundamentals.marketCap?.toNumber() ?? null,
           debtToEquity: fundamentals.debtToEquity?.toNumber() ?? null,
+          peRatio: null,
         }
       : null;
   }
@@ -192,6 +197,10 @@ export class PrismaScreenerRepository implements ScreenerRepository {
   }): Promise<ScreenerPeriodData> {
     const instrumentIds = input.candidates.map((candidate) => candidate.instrumentId);
     const companyIds = input.candidates.map((candidate) => candidate.companyId);
+    const earliestDisplayReturnDate = earliestStandardReturnStartDate(input.endDate);
+    const earliestPriceDate = earliestDisplayReturnDate < input.startDate
+      ? earliestDisplayReturnDate
+      : input.startDate;
 
     const [prices, fundamentals] = await Promise.all([
       this.client.dailyPrice.findMany({
@@ -200,7 +209,7 @@ export class PrismaScreenerRepository implements ScreenerRepository {
             in: instrumentIds,
           },
           tradingDate: {
-            gte: input.startDate,
+            gte: earliestPriceDate,
             lte: input.endDate,
           },
         },
@@ -231,13 +240,19 @@ export class PrismaScreenerRepository implements ScreenerRepository {
       }),
     ]);
 
+    const priceRepository = new ScreenerPeriodPriceRepository(prices.map((price) => ({
+      instrumentId: price.instrumentId,
+      tradingDate: price.tradingDate,
+      close: price.close.toNumber(),
+    })));
     const startPricesByInstrumentId = new Map<string, { tradingDate: Date; close: number }>();
     const endPricesByInstrumentId = new Map<string, { tradingDate: Date; close: number }>();
     const tradedValueTotals = new Map<string, { total: number; count: number }>();
     const fundamentalsByCompanyId = new Map<string, FundamentalsSnapshot>();
+    const standardReturnsByInstrumentId = new Map<string, ScreenerStandardReturns>();
 
     for (const price of prices) {
-      if (!startPricesByInstrumentId.has(price.instrumentId)) {
+      if (price.tradingDate >= input.startDate && !startPricesByInstrumentId.has(price.instrumentId)) {
         startPricesByInstrumentId.set(price.instrumentId, {
           tradingDate: price.tradingDate,
           close: price.close.toNumber(),
@@ -249,11 +264,13 @@ export class PrismaScreenerRepository implements ScreenerRepository {
         close: price.close.toNumber(),
       });
 
-      const existing = tradedValueTotals.get(price.instrumentId) ?? { total: 0, count: 0 };
-      tradedValueTotals.set(price.instrumentId, {
-        total: existing.total + price.close.toNumber() * Number(price.volume),
-        count: existing.count + 1,
-      });
+      if (price.tradingDate >= input.startDate) {
+        const existing = tradedValueTotals.get(price.instrumentId) ?? { total: 0, count: 0 };
+        tradedValueTotals.set(price.instrumentId, {
+          total: existing.total + price.close.toNumber() * Number(price.volume),
+          count: existing.count + 1,
+        });
+      }
     }
 
     for (const fundamental of fundamentals) {
@@ -262,9 +279,17 @@ export class PrismaScreenerRepository implements ScreenerRepository {
           asOfDate: fundamental.asOfDate,
           marketCap: fundamental.marketCap?.toNumber() ?? null,
           debtToEquity: fundamental.debtToEquity?.toNumber() ?? null,
+          peRatio: null,
         });
       }
     }
+
+    await Promise.all(input.candidates.map(async (candidate) => {
+      standardReturnsByInstrumentId.set(
+        candidate.instrumentId,
+        await calculateStandardReturns(priceRepository, candidate.instrumentId, input.endDate),
+      );
+    }));
 
     return {
       startPricesByInstrumentId,
@@ -276,6 +301,46 @@ export class PrismaScreenerRepository implements ScreenerRepository {
         ]),
       ),
       fundamentalsByCompanyId,
+      standardReturnsByInstrumentId,
     };
   }
+}
+
+class ScreenerPeriodPriceRepository {
+  constructor(private readonly prices: readonly { readonly instrumentId: string; readonly tradingDate: Date; readonly close: number }[]) {}
+
+  async findReturnCandidates() {
+    return [];
+  }
+
+  async findFirstCloseOnOrAfter(instrumentId: string, requestedDate: Date) {
+    return this.prices.find((price) => (
+      price.instrumentId === instrumentId &&
+      price.tradingDate.getTime() >= requestedDate.getTime()
+    )) ?? null;
+  }
+
+  async findLastCloseOnOrBefore(instrumentId: string, requestedDate: Date) {
+    for (let index = this.prices.length - 1; index >= 0; index -= 1) {
+      const price = this.prices[index]!;
+      if (
+        price.instrumentId === instrumentId &&
+        price.tradingDate.getTime() <= requestedDate.getTime()
+      ) {
+        return price;
+      }
+    }
+
+    return null;
+  }
+}
+
+function earliestStandardReturnStartDate(endDate: Date) {
+  const threeMonths = new Date(endDate);
+  threeMonths.setUTCMonth(threeMonths.getUTCMonth() - 3);
+
+  const oneWeek = new Date(endDate);
+  oneWeek.setUTCDate(oneWeek.getUTCDate() - 7);
+
+  return threeMonths < oneWeek ? threeMonths : oneWeek;
 }
