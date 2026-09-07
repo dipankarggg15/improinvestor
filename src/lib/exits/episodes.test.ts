@@ -13,6 +13,7 @@ const baseTrade = {
   strategyReviewPositionSnapshotId: null,
 };
 const strategyIdByPortfolioId = new Map([["portfolio-1", "strategy-1"]]);
+const strategyIdByStrategyVersionId = new Map([["version-2", "strategy-2"]]);
 
 describe("reconstructPositionEpisodes", () => {
   it("keeps partial sells open and closes only when quantity reaches zero", () => {
@@ -75,6 +76,19 @@ describe("reconstructPositionEpisodes", () => {
     });
 
     expect(episodes.map((episode) => episode.strategyVersionId)).toEqual(["version-1", "version-2"]);
+  });
+
+  it("uses the selected strategy version as the episode strategy owner", () => {
+    const episodes = reconstructPositionEpisodes({
+      strategyIdByPortfolioId,
+      strategyIdByStrategyVersionId,
+      trades: [
+        { ...trade("buy-1", "BUY", "2025-01-01", "5", "100"), strategyVersionId: "version-2" },
+      ],
+    });
+
+    expect(episodes[0]?.strategyId).toBe("strategy-2");
+    expect(episodes[0]?.strategyVersionId).toBe("version-2");
   });
 
   it("preserves review recommendation evidence separately from execution", () => {

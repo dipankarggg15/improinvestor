@@ -72,6 +72,7 @@ const hundred = new Prisma.Decimal(100);
 export function reconstructPositionEpisodes(input: {
   readonly trades: readonly EpisodeTrade[];
   readonly strategyIdByPortfolioId: ReadonlyMap<string, string>;
+  readonly strategyIdByStrategyVersionId?: ReadonlyMap<string, string>;
   readonly reviewSnapshotsById?: ReadonlyMap<string, ReviewSnapshotReference>;
 }) {
   const episodes: ReconstructedEpisode[] = [];
@@ -90,7 +91,11 @@ export function reconstructPositionEpisodes(input: {
 
     if (trade.side === "BUY") {
       if (!episode) {
-        const strategyId = input.strategyIdByPortfolioId.get(trade.portfolioId);
+        const strategyId = trade.strategyVersionId
+          ? input.strategyIdByStrategyVersionId?.get(trade.strategyVersionId) ??
+            input.strategyIdByPortfolioId.get(trade.portfolioId) ??
+            null
+          : input.strategyIdByPortfolioId.get(trade.portfolioId) ?? null;
         if (!strategyId) throw new Error("Missing strategy for portfolio.");
         episode = {
           temporaryId: `${key}:${trade.id}`,

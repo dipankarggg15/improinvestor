@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { recordTradeAction } from "@/app/portfolio/actions";
 import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
 import { prisma } from "@/lib/db/prisma";
-import { calculateRequiredCash, getDefaultTradePrice } from "@/lib/portfolio/service";
+import { calculateRequiredCash, getDefaultTradePrice, valuePortfolioAsOf } from "@/lib/portfolio/service";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/ui/format";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,7 @@ type NewTradePageProps = {
 
 export default async function NewTradePage({ searchParams }: NewTradePageProps) {
   const query = await searchParams;
+  const portfolioId = query.portfolioId;
   const candidateSnapshotId = query.candidateSnapshotId;
   const reviewSnapshotId = query.reviewSnapshotId;
   const snapshot = candidateSnapshotId
@@ -37,20 +38,51 @@ export default async function NewTradePage({ searchParams }: NewTradePageProps) 
       })
     : null;
 
-  if ((!snapshot || !snapshot.selected) && (!reviewSnapshot || reviewSnapshot.recommendation !== "SELL")) notFound();
+  if (!portfolioId && (!snapshot || !snapshot.selected) && (!reviewSnapshot || reviewSnapshot.recommendation !== "SELL")) notFound();
 
-  const portfolio = reviewSnapshot?.review.portfolio ?? await prisma.portfolio.findFirst({
-    where: { strategyId: snapshot?.strategyRun.strategyId },
-    orderBy: { inceptionDate: "asc" },
-  });
+  const portfolio = reviewSnapshot?.review.portfolio ?? (
+    portfolioId
+      ? await prisma.portfolio.findUnique({ where: { id: portfolioId } })
+      : await prisma.portfolio.findFirst({
+          where: { strategyId: snapshot?.strategyRun.strategyId },
+          orderBy: { inceptionDate: "asc" },
+        })
+  );
 
   if (!portfolio) notFound();
   const strategyVersions = await prisma.strategyVersion.findMany({
-    where: { strategyId: portfolio.strategyId },
+    where: { strategy: { status: "ACTIVE" } },
     orderBy: { versionNumber: "desc" },
     include: { strategy: true },
   });
   const defaultStrategyVersionId = snapshot?.strategyRun.strategyVersionId ?? "";
+
+  if (!snapshot && !reviewSnapshot) {
+    const [instruments, valuation] = await Promise.all([
+      prisma.instrument.findMany({
+        where: { active: true },
+        orderBy: [{ company: { name: "asc" } }, { exchange: "asc" }],
+        include: { company: true },
+      }),
+      valuePortfolioAsOf(prisma, portfolio.id, new Date()),
+    ]);
+    const instrumentById = new Map(instruments.map((instrument) => [instrument.id, instrument]));
+
+    return (
+      <ManualPortfolioTradePage
+        instruments={instruments}
+        openPositions={valuation.positions.map((position) => ({
+          companyId: position.companyId,
+          instrumentId: position.instrumentId,
+          companyName: instrumentById.get(position.instrumentId)?.company.name ?? position.companyId,
+          symbol: instrumentById.get(position.instrumentId)?.symbol ?? position.instrumentId,
+          exchange: instrumentById.get(position.instrumentId)?.exchange ?? "",
+        }))}
+        portfolioId={portfolio.id}
+        strategyVersions={strategyVersions}
+      />
+    );
+  }
 
   const instrumentId = reviewSnapshot?.instrumentId ?? snapshot?.instrumentId;
   const companyId = reviewSnapshot?.companyId ?? snapshot?.companyId;
@@ -151,6 +183,158 @@ export default async function NewTradePage({ searchParams }: NewTradePageProps) 
         </form>
       </div>
     </section>
+  );
+}
+
+type ManualInstrument = Awaited<ReturnType<typeof prisma.instrument.findMany>>[number] & {
+  readonly company: { readonly id: string; readonly name: string };
+};
+type ManualOpenPosition = {
+  readonly companyId: string;
+  readonly instrumentId: string;
+  readonly companyName: string;
+  readonly symbol: string;
+  readonly exchange: string;
+};
+
+function ManualPortfolioTradePage({
+  instruments,
+  openPositions,
+  portfolioId,
+  strategyVersions,
+}: {
+  readonly instruments: ManualInstrument[];
+  readonly openPositions: ManualOpenPosition[];
+  readonly portfolioId: string;
+  readonly strategyVersions: Array<{ readonly id: string; readonly versionNumber: number; readonly label: string | null; readonly strategy: { readonly name: string } }>;
+}) {
+  const today = formatDate(new Date());
+
+  return (
+    <section className="px-5 py-6 sm:px-8 lg:px-10">
+      <div className="max-w-4xl space-y-6">
+        <div>
+          <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
+          <h1 className="mt-2 text-3xl font-semibold">Record Trade</h1>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            Portfolio is already selected. A saved BUY or SELL is recorded in the immutable trade ledger.
+          </p>
+        </div>
+
+        <form action={recordTradeAction} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+          <input name="portfolioId" type="hidden" value={portfolioId} />
+          <input name="side" type="hidden" value="BUY" />
+          <h2 className="text-lg font-semibold">Buy</h2>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <StockSelect instruments={instruments} />
+            <TradeDateField defaultValue={today} />
+            <NumberField label="Quantity" min="0.000001" name="quantity" step="0.000001" />
+            <NumberField label="Price" min="0.0001" name="price" step="0.0001" />
+            <NumberField defaultValue="0.00" label="Fees" min="0" name="fees" step="0.0001" />
+            <label className="grid gap-2 text-sm font-medium">
+              Strategy Attribution
+              <select className="h-11 rounded-md border border-[var(--border)] px-3" name="strategyVersionId">
+                <option value="">None / Unassigned</option>
+                {strategyVersions.map((version) => (
+                  <option key={version.id} value={version.id}>
+                    {version.strategy.name} V{version.versionNumber}{version.label ? ` - ${version.label}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="mt-4 grid gap-2 text-sm font-medium">
+            Notes
+            <textarea className="min-h-20 rounded-md border border-[var(--border)] p-3" name="notes" />
+          </label>
+          <ConfirmSubmitButton
+            className="mt-5 h-11 rounded-md bg-[var(--accent)] px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            confirmMessage="Record this BUY trade in the immutable trade ledger?"
+            pendingLabel="Saving..."
+          >
+            Save Buy
+          </ConfirmSubmitButton>
+        </form>
+
+        <form action={recordTradeAction} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+          <input name="portfolioId" type="hidden" value={portfolioId} />
+          <input name="side" type="hidden" value="SELL" />
+          <input name="strategyVersionId" type="hidden" value="" />
+          <h2 className="text-lg font-semibold">Sell From Open Position</h2>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="grid gap-2 text-sm font-medium">
+              Stock
+              <select className="h-11 rounded-md border border-[var(--border)] px-3" name="stockKey" required>
+                {openPositions.map((position) => (
+                  <option key={`${position.companyId}:${position.instrumentId}`} value={`${position.companyId}:${position.instrumentId}`}>
+                    {position.companyName} - {position.symbol} {position.exchange}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <TradeDateField defaultValue={today} />
+            <NumberField label="Quantity" min="0.000001" name="quantity" step="0.000001" />
+            <NumberField label="Price" min="0.0001" name="price" step="0.0001" />
+            <NumberField defaultValue="0.00" label="Fees" min="0" name="fees" step="0.0001" />
+          </div>
+          <p className="mt-4 text-sm text-[var(--muted)]">
+            Strategy attribution is inherited from the open position episode.
+          </p>
+          <ConfirmSubmitButton
+            className="mt-5 h-11 rounded-md border border-[var(--border)] px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+            confirmMessage="Record this SELL trade in the immutable trade ledger?"
+            pendingLabel="Saving..."
+          >
+            Save Sell
+          </ConfirmSubmitButton>
+        </form>
+      </div>
+    </section>
+  );
+}
+
+function StockSelect({ instruments }: { readonly instruments: ManualInstrument[] }) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      Stock
+      <select className="h-11 rounded-md border border-[var(--border)] px-3" name="stockKey" required>
+        {instruments.map((instrument) => (
+          <option key={instrument.id} value={`${instrument.companyId}:${instrument.id}`}>
+            {instrument.company.name} - {instrument.symbol} ({instrument.exchange})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function TradeDateField({ defaultValue }: { readonly defaultValue: string }) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      Trade Date
+      <input className="h-11 rounded-md border border-[var(--border)] px-3" defaultValue={defaultValue} name="tradeDate" type="date" />
+    </label>
+  );
+}
+
+function NumberField({
+  defaultValue,
+  label,
+  min,
+  name,
+  step,
+}: {
+  readonly defaultValue?: string;
+  readonly label: string;
+  readonly min: string;
+  readonly name: string;
+  readonly step: string;
+}) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      {label}
+      <input className="h-11 rounded-md border border-[var(--border)] px-3" defaultValue={defaultValue} min={min} name={name} step={step} type="number" />
+    </label>
   );
 }
 

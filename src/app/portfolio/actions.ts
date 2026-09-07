@@ -11,8 +11,10 @@ export async function recordTradeAction(formData: FormData) {
   await requireOwner();
 
   const portfolioId = String(formData.get("portfolioId") ?? "");
-  const companyId = String(formData.get("companyId") ?? "");
-  const instrumentId = String(formData.get("instrumentId") ?? "");
+  const stockKey = nullableString(formData.get("stockKey"));
+  const [stockCompanyId, stockInstrumentId] = stockKey?.split(":") ?? [];
+  const companyId = stockCompanyId || String(formData.get("companyId") ?? "");
+  const instrumentId = stockInstrumentId || String(formData.get("instrumentId") ?? "");
   const strategyRunId = nullableString(formData.get("strategyRunId"));
   const strategyVersionId = nullableString(formData.get("strategyVersionId"));
   const strategyCandidateSnapshotId = nullableString(formData.get("strategyCandidateSnapshotId"));

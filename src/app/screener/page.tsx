@@ -1,5 +1,9 @@
-import Link from "next/link";
-
+import {
+  isStockResearchSortKey,
+  StockResearchTable,
+  type StockResearchRow,
+  type StockResearchSortKey,
+} from "@/components/research/stock-research-table";
 import {
   defaultScreenerFilters,
   runCustomReturnScreener,
@@ -16,23 +20,6 @@ export const dynamic = "force-dynamic";
 const crore = 10_000_000;
 const defaultStartDate = "2025-03-03";
 const defaultEndDate = "2025-12-31";
-const sortableColumns: readonly {
-  readonly label: string;
-  readonly sortKey: ScreenerSortKey;
-  readonly title?: string;
-}[] = [
-  { label: "Rank", sortKey: "rank" },
-  { label: "Stock", sortKey: "company" },
-  { label: "Price", sortKey: "currentPrice", title: "Latest available close on or before the screener end date" },
-  { label: "Return", sortKey: "returnPercent", title: "Return over the selected screener start and end dates" },
-  { label: "1W", sortKey: "oneWeekReturnPercent", title: "One-week return as of the screener end date" },
-  { label: "1M", sortKey: "oneMonthReturnPercent", title: "One-month return as of the screener end date" },
-  { label: "3M", sortKey: "threeMonthReturnPercent", title: "Three-month return as of the screener end date" },
-  { label: "MCap", sortKey: "marketCap", title: "Market Capitalization" },
-  { label: "D/E", sortKey: "debtToEquity", title: "Debt to Equity" },
-  { label: "ATV/D", sortKey: "averageTradedValue", title: "Average Traded Value per Day" },
-  { label: "P/E", sortKey: "peRatio", title: "Price to Earnings" },
-] as const;
 
 type ScreenerPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -178,46 +165,13 @@ function Results({
         ) : null}
       </div>
 
-      <div className="overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel)] shadow-sm">
-        <table className="w-full min-w-[920px] border-collapse text-left text-sm">
-          <thead className="bg-[var(--panel-soft)] text-xs uppercase text-[var(--muted)]">
-            <tr>
-              {sortableColumns.map(({ label, sortKey, title }) => (
-                <th className="border-b border-[var(--border)] px-3 py-3 font-semibold" key={sortKey}>
-                  <SortLink
-                    currentDirection={sortDirection}
-                    currentSort={sortBy}
-                    label={label}
-                    params={params}
-                    sortKey={sortKey}
-                    title={title}
-                  />
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {result.rows.map((row) => (
-              <tr className="border-b border-[var(--border)] last:border-b-0" key={row.instrumentId}>
-                <td className="px-3 py-3 font-medium">{row.rank}</td>
-                <td className="px-3 py-3">
-                  <span className="block font-medium text-[var(--foreground)]">{row.companyName}</span>
-                  <span className="text-xs text-[var(--muted)]">{row.exchange}:{row.symbol}</span>
-                </td>
-                <td className="px-3 py-3 font-medium">{formatRupees(row.currentPrice)}</td>
-                <td className="px-3 py-3 font-semibold">{formatPercent(row.returnPercent)}</td>
-                <td className="px-3 py-3 font-semibold">{formatNullablePercent(row.oneWeekReturnPercent)}</td>
-                <td className="px-3 py-3 font-semibold">{formatNullablePercent(row.oneMonthReturnPercent)}</td>
-                <td className="px-3 py-3 font-semibold">{formatNullablePercent(row.threeMonthReturnPercent)}</td>
-                <td className="px-3 py-3">{formatCrores(row.marketCap)}</td>
-                <td className="px-3 py-3">{row.debtToEquity.toFixed(2)}</td>
-                <td className="px-3 py-3">{formatCrores(row.averageTradedValue)}</td>
-                <td className="px-3 py-3">{formatNullableRatio(row.peRatio)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <StockResearchTable
+        basePath="/screener"
+        currentDirection={sortDirection}
+        currentSort={toStockResearchSortKey(sortBy)}
+        params={params}
+        rows={result.rows.map(toStockResearchRow)}
+      />
 
       {result.exclusions.length > 0 ? (
         <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4">
@@ -268,48 +222,6 @@ function Field({
         {suffix ? <span className="ml-2 text-xs text-[var(--muted)]">{suffix}</span> : null}
       </span>
     </label>
-  );
-}
-
-function SortLink({
-  currentDirection,
-  currentSort,
-  label,
-  params,
-  sortKey,
-  title,
-}: {
-  readonly currentDirection: ScreenerSortDirection;
-  readonly currentSort: ScreenerSortKey;
-  readonly label: string;
-  readonly params: Record<string, string | string[] | undefined>;
-  readonly sortKey: ScreenerSortKey;
-  readonly title?: string;
-}) {
-  const isCurrent = currentSort === sortKey;
-  const nextDirection: ScreenerSortDirection = isCurrent && currentDirection === "desc" ? "asc" : "desc";
-  const nextParams = new URLSearchParams();
-
-  for (const [key, value] of Object.entries(params)) {
-    if (typeof value === "string") {
-      nextParams.set(key, value);
-    }
-  }
-
-  nextParams.set("run", "1");
-  nextParams.set("sortBy", sortKey);
-  nextParams.set("sortDirection", nextDirection);
-
-  return (
-    <Link
-      aria-label={title ? `Sort by ${label}: ${title}` : `Sort by ${label}`}
-      className="inline-flex items-center gap-1 hover:text-[var(--foreground)]"
-      href={`/screener?${nextParams}`}
-      title={title}
-    >
-      {label}
-      {isCurrent ? <span>{currentDirection === "desc" ? "↓" : "↑"}</span> : null}
-    </Link>
   );
 }
 
@@ -387,48 +299,12 @@ function toUtcDate(value: string) {
 }
 
 function parseSortKey(value: string | undefined): ScreenerSortKey {
-  const allowed = new Set(sortableColumns.map((column) => column.sortKey));
-  return value && allowed.has(value as ScreenerSortKey) ? (value as ScreenerSortKey) : "rank";
+  return fromStockResearchSortKey(value) ?? "rank";
 }
 
 function parseSortDirection(value: string | undefined, sortBy: ScreenerSortKey): ScreenerSortDirection {
   if (value === "asc" || value === "desc") return value;
   return sortBy === "rank" || sortBy === "company" ? "asc" : "desc";
-}
-
-function formatRupees(value: number) {
-  return `₹${value.toLocaleString("en-IN", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-  })}`;
-}
-
-function formatCrores(value: number) {
-  const valueInCrores = value / crore;
-  return `₹${valueInCrores.toLocaleString("en-IN", {
-    maximumFractionDigits: valueInCrores >= 100 ? 0 : 1,
-    minimumFractionDigits: valueInCrores >= 100 ? 0 : 1,
-  })} Cr`;
-}
-
-function formatPercent(value: number) {
-  return `${value.toLocaleString("en-IN", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-  })}%`;
-}
-
-function formatNullablePercent(value: number | null) {
-  return value === null ? "—" : formatPercent(value);
-}
-
-function formatNullableRatio(value: number | null) {
-  return value === null
-    ? "—"
-    : value.toLocaleString("en-IN", {
-        maximumFractionDigits: 2,
-        minimumFractionDigits: 2,
-      });
 }
 
 function formatExclusionReason(reason: ScreenerExclusionReason) {
@@ -444,4 +320,44 @@ function formatExclusionReason(reason: ScreenerExclusionReason) {
     case "liquidity_below_minimum":
       return "average traded value below minimum";
   }
+}
+
+function toStockResearchRow(row: Extract<ScreenerResult, { ok: true }>["rows"][number]): StockResearchRow {
+  return {
+    id: row.instrumentId,
+    rank: row.rank,
+    stockName: row.companyName,
+    stockDetail: `${row.exchange}:${row.symbol}`,
+    price: row.currentPrice,
+    returnPercent: row.returnPercent,
+    oneWeekReturnPercent: row.oneWeekReturnPercent,
+    oneMonthReturnPercent: row.oneMonthReturnPercent,
+    threeMonthReturnPercent: row.threeMonthReturnPercent,
+    marketCap: row.marketCap,
+    debtToEquity: row.debtToEquity,
+    averageTradedValue: row.averageTradedValue,
+    peRatio: row.peRatio,
+  };
+}
+
+function toStockResearchSortKey(sortBy: ScreenerSortKey): StockResearchSortKey {
+  if (sortBy === "company") return "stock";
+  if (sortBy === "currentPrice") return "price";
+  if (sortBy === "returnPercent") return "return";
+  if (sortBy === "oneWeekReturnPercent") return "oneWeekReturn";
+  if (sortBy === "oneMonthReturnPercent") return "oneMonthReturn";
+  if (sortBy === "threeMonthReturnPercent") return "threeMonthReturn";
+  if (sortBy === "symbol" || sortBy === "exchange") return "stock";
+  return sortBy;
+}
+
+function fromStockResearchSortKey(value: string | undefined): ScreenerSortKey | null {
+  if (!isStockResearchSortKey(value)) return null;
+  if (value === "stock") return "company";
+  if (value === "price") return "currentPrice";
+  if (value === "return") return "returnPercent";
+  if (value === "oneWeekReturn") return "oneWeekReturnPercent";
+  if (value === "oneMonthReturn") return "oneMonthReturnPercent";
+  if (value === "threeMonthReturn") return "threeMonthReturnPercent";
+  return value;
 }

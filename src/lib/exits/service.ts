@@ -32,8 +32,9 @@ export async function rebuildPositionEpisodes(client: PrismaClient) {
     await tx.trade.updateMany({ data: { positionEpisodeId: null } });
     await tx.positionEpisode.deleteMany({});
 
-    const [portfolios, trades, reviewSnapshots] = await Promise.all([
+    const [portfolios, strategyVersions, trades, reviewSnapshots] = await Promise.all([
       tx.portfolio.findMany({ select: { id: true, strategyId: true } }),
+      tx.strategyVersion.findMany({ select: { id: true, strategyId: true } }),
       tx.trade.findMany({
         orderBy: [{ tradeDate: "asc" }, { createdAt: "asc" }],
         select: {
@@ -68,6 +69,7 @@ export async function rebuildPositionEpisodes(client: PrismaClient) {
     ]);
 
     const strategyIdByPortfolioId = new Map(portfolios.map((portfolio) => [portfolio.id, portfolio.strategyId]));
+    const strategyIdByStrategyVersionId = new Map(strategyVersions.map((version) => [version.id, version.strategyId]));
     const reviewSnapshotsById = new Map<string, ReviewSnapshotReference>(
       reviewSnapshots.map((snapshot) => [
         snapshot.id,
@@ -83,6 +85,7 @@ export async function rebuildPositionEpisodes(client: PrismaClient) {
     const reconstructed = reconstructPositionEpisodes({
       trades,
       strategyIdByPortfolioId,
+      strategyIdByStrategyVersionId,
       reviewSnapshotsById,
     });
 

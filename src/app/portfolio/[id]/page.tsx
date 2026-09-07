@@ -61,10 +61,18 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
   return (
     <section className="px-5 py-6 sm:px-8 lg:px-10">
       <div className="max-w-7xl space-y-6">
-        <div>
-          <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
-          <h1 className="mt-2 text-3xl font-semibold">{portfolio.name}</h1>
-          <p className="mt-2 text-sm text-[var(--muted)]">{portfolio.strategy.name}</p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
+            <h1 className="mt-2 text-3xl font-semibold">{portfolio.name}</h1>
+            <p className="mt-2 text-sm text-[var(--muted)]">{portfolio.strategy.name}</p>
+          </div>
+          <Link
+            className="inline-flex h-11 items-center rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)]"
+            href={`/portfolio/trades/new?portfolioId=${portfolio.id}`}
+          >
+            + Record Trade
+          </Link>
         </div>
 
         <div className="grid gap-3 md:grid-cols-4">

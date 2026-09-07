@@ -71,10 +71,6 @@ export async function recordTrade(client: PrismaClient, input: RecordTradeInput)
     if (sourceRun && sourceRun.strategyId !== portfolio.strategyId) {
       throw new Error("Strategy run does not belong to the portfolio strategy.");
     }
-    if (selectedStrategyVersion && selectedStrategyVersion.strategyId !== portfolio.strategyId) {
-      throw new Error("Strategy version does not belong to the portfolio strategy.");
-    }
-
     if (candidateSnapshot) {
       if (candidateSnapshot.strategyRunId !== sourceRun?.id) {
         throw new Error("Candidate snapshot does not belong to the supplied strategy run.");
