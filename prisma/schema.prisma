@@ -150,6 +150,23 @@ enum CounterfactualDecisionReason {
   SIMULATION_END
 }
 
+enum ReturnExperimentStatus {
+  TEMPORARY
+  SAVED
+}
+
+enum HistoricalStrategyRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum HistoricalStrategyPositionStatus {
+  OPEN
+  CLOSED
+  OPEN_AT_END
+}
+
 model Company {
   id           String                @id @default(cuid())
   name         String
@@ -167,6 +184,8 @@ model Company {
   counterfactualTrades CounterfactualTrade[]
   counterfactualPositionEpisodes CounterfactualPositionEpisode[]
   counterfactualDecisionSnapshots CounterfactualDecisionSnapshot[]
+  returnExperimentPositions ReturnExperimentPosition[]
+  historicalStrategyPositions HistoricalStrategyPosition[]
 
   @@index([name])
   @@index([sector])
@@ -192,6 +211,8 @@ model Instrument {
   counterfactualTrades CounterfactualTrade[]
   counterfactualPositionEpisodes CounterfactualPositionEpisode[]
   counterfactualDecisionSnapshots CounterfactualDecisionSnapshot[]
+  returnExperimentPositions ReturnExperimentPosition[]
+  historicalStrategyPositions HistoricalStrategyPosition[]
 
   @@unique([exchange, symbol])
   @@unique([exchange, instrumentKey])
@@ -252,6 +273,45 @@ model DataSync {
   @@index([status, startedAt])
 }
 
+model ReturnExperiment {
+  id        String                 @id @default(cuid())
+  name      String?
+  status    ReturnExperimentStatus @default(TEMPORARY)
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+  savedAt   DateTime?
+  positions ReturnExperimentPosition[]
+
+  @@index([status, updatedAt])
+  @@index([savedAt])
+}
+
+model ReturnExperimentPosition {
+  id                 String           @id @default(cuid())
+  experimentId       String
+  companyId          String
+  instrumentId       String
+  requestedStartDate DateTime         @db.Date
+  requestedEndDate   DateTime         @db.Date
+  resolvedStartDate  DateTime?        @db.Date
+  resolvedEndDate    DateTime?        @db.Date
+  startPrice         Decimal?         @db.Decimal(18, 4)
+  endPrice           Decimal?         @db.Decimal(18, 4)
+  holdingDays        Int?
+  returnPercent      Decimal?         @db.Decimal(12, 4)
+  excludedReason     String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  experiment         ReturnExperiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  company            Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  instrument         Instrument       @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+
+  @@index([experimentId, createdAt])
+  @@index([companyId])
+  @@index([instrumentId])
+  @@index([requestedStartDate, requestedEndDate])
+}
+
 model Strategy {
   id          String         @id @default(cuid())
   name        String         @unique
@@ -265,6 +325,7 @@ model Strategy {
   reviews     StrategyReview[]
   positionEpisodes PositionEpisode[]
   counterfactualExperiments CounterfactualExperiment[]
+  historicalRuns HistoricalStrategyRun[]
 
   @@index([status])
 }
@@ -284,9 +345,114 @@ model StrategyVersion {
   trades        Trade[]
   positionEpisodes PositionEpisode[]
   counterfactualExperiments CounterfactualExperiment[]
+  historicalRuns HistoricalStrategyRun[]
 
   @@unique([strategyId, versionNumber])
   @@index([strategyId, effectiveFrom])
+}
+
+model HistoricalStrategyRun {
+  id                       String                      @id @default(cuid())
+  strategyId               String
+  strategyVersionId        String
+  status                   HistoricalStrategyRunStatus
+  requestedStartDate       DateTime                    @db.Date
+  requestedEndDate         DateTime                    @db.Date
+  effectiveStartDate       DateTime?                   @db.Date
+  effectiveEndDate         DateTime?                   @db.Date
+  initialCapital           Decimal                     @db.Decimal(20, 2)
+  endingValue              Decimal?                    @db.Decimal(20, 2)
+  totalReturnPercent       Decimal?                    @db.Decimal(12, 4)
+  cagrPercent              Decimal?                    @db.Decimal(12, 4)
+  maxDrawdownPercent       Decimal?                    @db.Decimal(12, 4)
+  initialPositionCount     Int                         @default(0)
+  tradeCount               Int                         @default(0)
+  stopLossExitCount        Int                         @default(0)
+  monthlyRankExitCount     Int                         @default(0)
+  graduationCount          Int                         @default(0)
+  endingOpenPositionCount  Int                         @default(0)
+  unavailableFilters       Json
+  limitations              Json
+  assumptions              Json
+  errorMessage             String?
+  startedAt                DateTime                    @default(now())
+  completedAt              DateTime?
+  createdAt                DateTime                    @default(now())
+  strategy                 Strategy                    @relation(fields: [strategyId], references: [id], onDelete: Restrict)
+  strategyVersion          StrategyVersion             @relation(fields: [strategyVersionId], references: [id], onDelete: Restrict)
+  positions                HistoricalStrategyPosition[]
+  events                   HistoricalStrategyEvent[]
+  dailyEquity              HistoricalStrategyDailyEquity[]
+
+  @@index([strategyId, requestedStartDate, requestedEndDate])
+  @@index([strategyVersionId, createdAt])
+  @@index([status, createdAt])
+}
+
+model HistoricalStrategyPosition {
+  id                         String                         @id @default(cuid())
+  runId                      String
+  companyId                  String
+  instrumentId               String
+  status                     HistoricalStrategyPositionStatus
+  entryDate                  DateTime                       @db.Date
+  entryPrice                 Decimal                        @db.Decimal(18, 4)
+  quantity                   Decimal                        @db.Decimal(20, 6)
+  allocation                 Decimal                        @db.Decimal(20, 2)
+  entryRank                  Int?
+  entryReturn1W              Decimal?                       @db.Decimal(12, 4)
+  stopTriggerDate            DateTime?                      @db.Date
+  stopTriggerPrice           Decimal?                       @db.Decimal(18, 4)
+  exitDate                   DateTime?                      @db.Date
+  exitPrice                  Decimal?                       @db.Decimal(18, 4)
+  exitReason                 String?
+  realizedReturnPercent      Decimal?                       @db.Decimal(12, 4)
+  reviewHistory              Json
+  createdAt                  DateTime                       @default(now())
+  run                        HistoricalStrategyRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+  company                    Company                        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  instrument                 Instrument                     @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+  events                     HistoricalStrategyEvent[]
+
+  @@index([runId, entryDate])
+  @@index([runId, status])
+  @@index([companyId])
+  @@index([instrumentId])
+}
+
+model HistoricalStrategyEvent {
+  id            String                     @id @default(cuid())
+  runId         String
+  positionId    String?
+  companyId     String?
+  instrumentId  String?
+  eventDate     DateTime                   @db.Date
+  eventType     String
+  details       Json
+  createdAt     DateTime                   @default(now())
+  run           HistoricalStrategyRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  position      HistoricalStrategyPosition? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  @@index([runId, eventDate])
+  @@index([runId, eventType])
+  @@index([companyId])
+  @@index([instrumentId])
+}
+
+model HistoricalStrategyDailyEquity {
+  id                      String                @id @default(cuid())
+  runId                   String
+  date                    DateTime              @db.Date
+  cash                    Decimal               @db.Decimal(20, 2)
+  investedValue           Decimal               @db.Decimal(20, 2)
+  totalEquity             Decimal               @db.Decimal(20, 2)
+  cumulativeReturnPercent Decimal               @db.Decimal(12, 4)
+  drawdownPercent         Decimal               @db.Decimal(12, 4)
+  openPositionCount       Int
+  run                     HistoricalStrategyRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, date])
+  @@index([runId, date])
 }
 
 model StrategyRun {

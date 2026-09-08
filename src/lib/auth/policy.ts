@@ -9,8 +9,10 @@ const protectedRoutes = [
   "/portfolio",
   "/stocks",
   "/screener",
+  "/return-history",
   "/analytics",
   "/research",
+  "/api/research",
   "/settings",
 ] as const;
 

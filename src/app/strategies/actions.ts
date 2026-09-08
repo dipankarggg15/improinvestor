@@ -4,13 +4,16 @@ import { redirect } from "next/navigation";
 
 import { requireOwner } from "@/lib/auth/server";
 import { prisma } from "@/lib/db/prisma";
+import {
+  parseHistoricalRunDate,
+  runEarlySuperstarsHistorical,
+} from "@/lib/strategies/historical-run-service";
 import { assignOpenEpisodeToStrategyVersion } from "@/lib/strategies/live-holdings";
 import { createNextStrategyVersion, runCurrentStrategyVersion } from "@/lib/strategies/run-service";
 
-export async function runStrategyAction(formData: FormData) {
+export async function runStrategyAction(strategyId: string, formData: FormData) {
   await requireOwner();
 
-  const strategyId = String(formData.get("strategyId") ?? "");
   const runDateValue = String(formData.get("runDate") ?? "");
 
   if (!strategyId || !/^\d{4}-\d{2}-\d{2}$/.test(runDateValue)) {
@@ -25,10 +28,29 @@ export async function runStrategyAction(formData: FormData) {
   redirect(`/strategies/${strategyId}/runs/${run.id}`);
 }
 
-export async function cloneStrategyVersionAction(formData: FormData) {
+export async function runEarlySuperstarsHistoricalAction(strategyId: string, formData: FormData) {
   await requireOwner();
 
-  const strategyId = String(formData.get("strategyId") ?? "");
+  const requestedStartDate = parseHistoricalRunDate(formData.get("startDate"), "Start Date");
+  const requestedEndDate = parseHistoricalRunDate(formData.get("endDate"), "End Date");
+
+  if (!strategyId) {
+    throw new Error("Strategy is required.");
+  }
+
+  const run = await runEarlySuperstarsHistorical({
+    strategyId,
+    requestedStartDate,
+    requestedEndDate,
+    client: prisma,
+  });
+
+  redirect(`/strategies/${strategyId}/historical-runs/${run.id}`);
+}
+
+export async function cloneStrategyVersionAction(strategyId: string) {
+  await requireOwner();
+
   const latest = await prisma.strategyVersion.findFirst({
     where: { strategyId },
     orderBy: { versionNumber: "desc" },
@@ -49,12 +71,13 @@ export async function cloneStrategyVersionAction(formData: FormData) {
   redirect(`/strategies/${strategyId}`);
 }
 
-export async function assignOpenEpisodeStrategyVersionAction(formData: FormData) {
+export async function assignOpenEpisodeStrategyVersionAction(
+  strategyId: string,
+  episodeId: string,
+  strategyVersionId: string,
+) {
   await requireOwner();
 
-  const strategyId = String(formData.get("strategyId") ?? "");
-  const episodeId = String(formData.get("episodeId") ?? "");
-  const strategyVersionId = String(formData.get("strategyVersionId") ?? "");
   if (!strategyId || !episodeId || !strategyVersionId) {
     throw new Error("Strategy, holding, and strategy version are required.");
   }

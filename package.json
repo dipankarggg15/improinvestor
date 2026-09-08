@@ -24,6 +24,7 @@
     "validate:upstox-sample": "tsx scripts/validate-upstox-sync-sample.ts",
     "sync:upstox": "tsx scripts/sync-upstox-market.ts",
     "schema:real-market": "tsx scripts/apply-real-market-schema.ts",
+    "schema:historical-strategy": "tsx scripts/apply-historical-strategy-runner-schema.ts",
     "measure:market-storage": "tsx scripts/measure-market-storage.ts",
     "validate:real-market": "tsx scripts/validate-real-market-import.ts",
     "verify:strategies": "tsx scripts/verify-strategy-runs.ts",

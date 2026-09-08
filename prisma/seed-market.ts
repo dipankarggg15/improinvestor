@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 const chunkSize = 5_000;
 
 async function main() {
-  assertSafeSyntheticReset();
+  await assertSafeSyntheticReset();
 
   const market = generateSyntheticMarket({ seed: syntheticMarketSeed, companyCount: 300 });
 
@@ -147,13 +147,25 @@ async function createInChunks<T>(items: T[], create: (data: T[]) => Promise<unkn
   }
 }
 
-function assertSafeSyntheticReset() {
+async function assertSafeSyntheticReset() {
   if (process.env.NODE_ENV === "production") {
     throw new Error("Refusing to reset synthetic market data while NODE_ENV=production.");
   }
 
   if (process.env.ALLOW_SYNTHETIC_MARKET_RESET !== "true") {
     throw new Error("Set ALLOW_SYNTHETIC_MARKET_RESET=true to rebuild synthetic market data.");
+  }
+
+  const realMarketRows = await prisma.company.count({
+    where: {
+      marketDataSource: "UPSTOX_REAL",
+    },
+  });
+
+  if (realMarketRows > 0 && process.env.ALLOW_MIXED_REAL_SYNTHETIC_MARKET !== "true") {
+    throw new Error(
+      "Refusing to seed synthetic market data while UPSTOX_REAL companies exist. Set ALLOW_MIXED_REAL_SYNTHETIC_MARKET=true only for an isolated development database.",
+    );
   }
 }
 
