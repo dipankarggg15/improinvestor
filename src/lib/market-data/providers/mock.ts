@@ -18,5 +18,22 @@ export function createMockMarketDataProvider(): MarketDataProvider {
           candle.tradingDate <= input.endDate,
       );
     },
+    async fetchCurrentQuote(input) {
+      const candles = market.candles
+        .filter((candle) => candle.instrumentKey === input.instrumentKey)
+        .sort((left, right) => right.tradingDate.getTime() - left.tradingDate.getTime());
+      const latest = candles[0];
+      if (!latest) {
+        throw new Error(`No mock quote available for ${input.instrumentKey}.`);
+      }
+
+      return {
+        instrumentKey: input.instrumentKey,
+        lastPrice: latest.close,
+        lastTradedAt: latest.tradingDate,
+        previousClose: null,
+        volume: latest.volume,
+      };
+    },
   };
 }

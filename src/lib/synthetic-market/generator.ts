@@ -202,9 +202,12 @@ function generateInstruments(company: GeneratedCompanyShape, index: number): Pro
   return exchanges.map((exchange) => ({
     exchange,
     symbol: exchange === "NSE" ? company.symbol : String(700000 + index),
+    tradingSymbol: exchange === "NSE" ? company.symbol : String(700000 + index),
     instrumentKey: `${exchange}_EQ|${company.isin}`,
     name: company.name,
     isin: company.isin,
+    segment: `${exchange}_EQ`,
+    instrumentType: "EQ",
     sector: company.sector,
     active: true,
   }));

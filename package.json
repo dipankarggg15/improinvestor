@@ -20,6 +20,7 @@
     "seed:exits": "tsx scripts/seed-exits.ts",
     "seed:counterfactuals": "tsx scripts/seed-counterfactuals.ts",
     "verify:market": "tsx scripts/verify-market.ts",
+    "validate:upstox": "tsx scripts/validate-upstox-provider.ts",
     "verify:strategies": "tsx scripts/verify-strategy-runs.ts",
     "check:production-config": "tsx scripts/check-production-config.ts",
     "postinstall": "prisma generate"
