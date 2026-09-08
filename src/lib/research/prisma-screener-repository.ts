@@ -26,6 +26,7 @@ export class PrismaScreenerRepository implements ScreenerRepository {
         tradingDate: {
           gte: requestedDate,
         },
+        marketDataSource: "SYNTHETIC",
       },
       orderBy: {
         tradingDate: "asc",
@@ -50,6 +51,7 @@ export class PrismaScreenerRepository implements ScreenerRepository {
         tradingDate: {
           lte: requestedDate,
         },
+        marketDataSource: "SYNTHETIC",
       },
       orderBy: {
         tradingDate: "desc",
@@ -72,6 +74,7 @@ export class PrismaScreenerRepository implements ScreenerRepository {
     const instruments = await this.client.instrument.findMany({
       where: {
         active: true,
+        marketDataSource: "SYNTHETIC",
       },
       orderBy: [{ companyId: "asc" }, { exchange: "asc" }],
       select: {
@@ -87,6 +90,7 @@ export class PrismaScreenerRepository implements ScreenerRepository {
         id: {
           in: [...new Set(instruments.map((instrument) => instrument.companyId))],
         },
+        marketDataSource: "SYNTHETIC",
       },
       select: {
         id: true,
@@ -138,6 +142,7 @@ export class PrismaScreenerRepository implements ScreenerRepository {
         asOfDate: {
           lte: asOfDate,
         },
+        marketDataSource: "SYNTHETIC",
       },
       orderBy: {
         asOfDate: "desc",
@@ -171,6 +176,7 @@ export class PrismaScreenerRepository implements ScreenerRepository {
           gte: input.startDate,
           lte: input.endDate,
         },
+        marketDataSource: "SYNTHETIC",
       },
       select: {
         close: true,
@@ -212,6 +218,7 @@ export class PrismaScreenerRepository implements ScreenerRepository {
             gte: earliestPriceDate,
             lte: input.endDate,
           },
+          marketDataSource: "SYNTHETIC",
         },
         orderBy: [{ instrumentId: "asc" }, { tradingDate: "asc" }],
         select: {
@@ -229,6 +236,7 @@ export class PrismaScreenerRepository implements ScreenerRepository {
           asOfDate: {
             lte: input.endDate,
           },
+          marketDataSource: "SYNTHETIC",
         },
         orderBy: [{ companyId: "asc" }, { asOfDate: "desc" }],
         select: {

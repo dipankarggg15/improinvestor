@@ -204,9 +204,9 @@ model DailyPrice {
   id          String     @id @default(cuid())
   instrumentId String
   tradingDate DateTime   @db.Date
-  open        Decimal    @db.Decimal(18, 4)
-  high        Decimal    @db.Decimal(18, 4)
-  low         Decimal    @db.Decimal(18, 4)
+  open        Decimal?   @db.Decimal(18, 4)
+  high        Decimal?   @db.Decimal(18, 4)
+  low         Decimal?   @db.Decimal(18, 4)
   close       Decimal    @db.Decimal(18, 4)
   volume      BigInt
   marketDataSource MarketDataSource @default(SYNTHETIC)
@@ -223,6 +223,7 @@ model CompanyFundamentals {
   companyId    String
   asOfDate     DateTime @db.Date
   marketCap    Decimal? @db.Decimal(20, 2)
+  peRatio      Decimal? @db.Decimal(12, 4)
   debtToEquity Decimal? @db.Decimal(12, 4)
   marketDataSource MarketDataSource @default(SYNTHETIC)
   company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)

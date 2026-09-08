@@ -12,6 +12,7 @@ export type UpstoxSyncOptions = {
   readonly mode: UpstoxSyncMode;
   readonly years?: number;
   readonly concurrency?: number;
+  readonly progressEvery?: number;
   readonly limit?: number;
   readonly symbols?: readonly string[];
   readonly now?: Date;
@@ -86,7 +87,7 @@ export function latestCompletedEodDate(now = new Date()) {
   return date;
 }
 
-export function fiveYearStartDate(endDate: Date, years = 5) {
+export function marketHistoryStartDate(endDate: Date, years = 1) {
   const startDate = new Date(endDate);
   startDate.setUTCFullYear(startDate.getUTCFullYear() - years);
   return startDate;
@@ -99,7 +100,7 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
 
   const startedAt = new Date();
   const endDate = latestCompletedEodDate(options.now);
-  const backfillStartDate = fiveYearStartDate(endDate, options.years ?? 5);
+  const backfillStartDate = marketHistoryStartDate(endDate, options.years ?? 1);
   const allInstruments = await options.provider.fetchInstruments();
   const allowedSymbols = new Set(options.symbols?.map((symbol) => symbol.toUpperCase()));
   const companies = canonicalizeUpstoxEquities(allInstruments)
@@ -116,6 +117,7 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
   let skipped = 0;
   let candlesUpserted = 0;
   const failures: Array<{ readonly symbol: string; readonly instrumentKey: string; readonly error: string }> = [];
+  const progressEvery = Math.max(1, options.progressEvery ?? 25);
 
   await mapConcurrent(companies, Math.max(1, options.concurrency ?? 2), async (company) => {
     const instrument = company.canonicalInstrument;
@@ -151,7 +153,9 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
       });
     } finally {
       processed += 1;
-      await updateSyncProgress(options.client, syncJob.id, { processed, successful, skipped, failures, candlesUpserted });
+      if (processed % progressEvery === 0 || processed === companies.length) {
+        await updateSyncProgress(options.client, syncJob.id, { processed, successful, skipped, failures, candlesUpserted });
+      }
     }
   });
 
@@ -266,34 +270,18 @@ function validateCandles(candles: readonly ProviderDailyCandle[], endDate: Date)
 
 async function upsertDailyPrices(client: PrismaClient, instrumentId: string, candles: readonly ProviderDailyCandle[]) {
   const db = client as unknown as RealMarketPrismaClient;
-  let count = 0;
+  await db.dailyPrice.createMany({
+    data: candles.map((candle) => ({
+      instrumentId,
+      tradingDate: candle.tradingDate,
+      close: candle.close,
+      volume: candle.volume,
+      marketDataSource: realSource,
+    })),
+    skipDuplicates: true,
+  });
 
-  for (const candle of candles) {
-    await db.dailyPrice.upsert({
-      where: { instrumentId_tradingDate: { instrumentId, tradingDate: candle.tradingDate } },
-      update: {
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        volume: candle.volume,
-        marketDataSource: realSource,
-      },
-      create: {
-        instrumentId,
-        tradingDate: candle.tradingDate,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        volume: candle.volume,
-        marketDataSource: realSource,
-      },
-    });
-    count += 1;
-  }
-
-  return count;
+  return candles.length;
 }
 
 async function withRetry<T>(operation: () => Promise<T>, attempts = 4) {
@@ -331,6 +319,19 @@ async function createSyncJob(
   metadata: { readonly mode: UpstoxSyncMode; readonly totalCompanies: number; readonly endDate: Date; readonly startedAt: Date },
 ) {
   const db = client as unknown as RealMarketPrismaClient;
+  await db.dataSync.updateMany({
+    where: {
+      provider: "upstox",
+      dataType: "real_market_eod",
+      status: "RUNNING",
+    },
+    data: {
+      status: "FAILED",
+      completedAt: metadata.startedAt,
+      errorMessage: "Superseded by a resumed Upstox real-market sync.",
+    },
+  });
+
   return db.dataSync.create({
     data: {
       provider: "upstox",
@@ -410,10 +411,11 @@ type RealMarketPrismaClient = {
   };
   readonly dailyPrice: {
     findFirst(input: unknown): Promise<{ readonly tradingDate: Date } | null>;
-    upsert(input: unknown): Promise<unknown>;
+    createMany(input: unknown): Promise<unknown>;
   };
   readonly dataSync: {
     create(input: unknown): Promise<{ readonly id: string }>;
+    updateMany(input: unknown): Promise<unknown>;
     update(input: unknown): Promise<unknown>;
   };
 };

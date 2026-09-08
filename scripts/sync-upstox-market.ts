@@ -12,7 +12,8 @@ async function main() {
   const mode = readMode(args.mode);
   const limit = args.limit ? Number(args.limit) : undefined;
   const concurrency = args.concurrency ? Number(args.concurrency) : 2;
-  const years = args.years ? Number(args.years) : 5;
+  const progressEvery = args.progressEvery ? Number(args.progressEvery) : 25;
+  const years = args.years ? Number(args.years) : 1;
   const symbols = args.symbols?.split(",").map((symbol) => symbol.trim()).filter(Boolean);
 
   if (args.full !== "true" && !limit && (!symbols || symbols.length === 0)) {
@@ -28,6 +29,7 @@ async function main() {
     mode,
     years,
     concurrency,
+    progressEvery,
     limit,
     symbols,
   });

@@ -157,6 +157,7 @@ async function tradeHistoryStockWhere(stock: string): Promise<Prisma.TradeWhereI
 
   const instruments = await prisma.instrument.findMany({
     where: {
+      marketDataSource: "SYNTHETIC",
       trades: { some: {} },
     },
     orderBy: [{ company: { name: "asc" } }, { exchange: "desc" }, { symbol: "asc" }],

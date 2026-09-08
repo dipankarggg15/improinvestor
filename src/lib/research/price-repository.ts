@@ -42,6 +42,7 @@ export class PrismaPriceRepository implements PriceRepository {
         tradingDate: {
           gte: requestedDate,
         },
+        marketDataSource: "SYNTHETIC",
       },
       orderBy: {
         tradingDate: "asc",
@@ -66,6 +67,7 @@ export class PrismaPriceRepository implements PriceRepository {
         tradingDate: {
           lte: requestedDate,
         },
+        marketDataSource: "SYNTHETIC",
       },
       orderBy: {
         tradingDate: "desc",
@@ -84,6 +86,7 @@ export class PrismaPriceRepository implements PriceRepository {
     const instruments = await this.client.instrument.findMany({
       where: {
         active: filters.activeOnly ?? true,
+        marketDataSource: "SYNTHETIC",
         companyId: filters.companyIds ? { in: filters.companyIds } : undefined,
         exchange: filters.exchanges ? { in: filters.exchanges } : undefined,
       },
@@ -101,6 +104,7 @@ export class PrismaPriceRepository implements PriceRepository {
         id: {
           in: [...new Set(instruments.map((instrument) => instrument.companyId))],
         },
+        marketDataSource: "SYNTHETIC",
       },
       select: {
         id: true,

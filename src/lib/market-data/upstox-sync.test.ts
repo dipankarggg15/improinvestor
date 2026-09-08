@@ -5,6 +5,7 @@ import {
   canonicalizeUpstoxEquities,
   chooseCanonicalInstrument,
   latestCompletedEodDate,
+  marketHistoryStartDate,
   runUpstoxRealMarketSync,
 } from "@/lib/market-data/upstox-sync";
 
@@ -23,6 +24,7 @@ describe("Upstox real-market sync", () => {
 
   it("never selects the current calendar day as completed EOD", () => {
     expect(latestCompletedEodDate(new Date("2026-09-08T10:00:00.000Z")).toISOString().slice(0, 10)).toBe("2026-09-07");
+    expect(marketHistoryStartDate(new Date("2026-09-07T00:00:00.000Z")).toISOString().slice(0, 10)).toBe("2025-09-07");
   });
 
   it("backfills a small batch idempotently with company, instrument, and candle upserts", async () => {
@@ -192,15 +194,15 @@ function createFakePrisma() {
           .filter((price) => price.instrumentId === input.where.instrumentId && price.marketDataSource === input.where.marketDataSource)
           .sort((left, right) => right.tradingDate.getTime() - left.tradingDate.getTime())[0] ?? null;
       },
-      async upsert(input: { where: { instrumentId_tradingDate: { instrumentId: string; tradingDate: Date } }; create: { instrumentId: string; tradingDate: Date; marketDataSource: string }; update: { marketDataSource: string } }) {
-        const key = input.where.instrumentId_tradingDate;
-        const existing = state.dailyPrices.find((price) => price.instrumentId === key.instrumentId && price.tradingDate.getTime() === key.tradingDate.getTime());
-        if (existing) {
-          existing.marketDataSource = input.update.marketDataSource;
-          return existing;
+      async createMany(input: { data: Array<{ instrumentId: string; tradingDate: Date; marketDataSource: string }>; skipDuplicates: boolean }) {
+        let count = 0;
+        for (const row of input.data) {
+          const existing = state.dailyPrices.find((price) => price.instrumentId === row.instrumentId && price.tradingDate.getTime() === row.tradingDate.getTime());
+          if (existing && input.skipDuplicates) continue;
+          state.dailyPrices.push(row);
+          count += 1;
         }
-        state.dailyPrices.push(input.create);
-        return input.create;
+        return { count };
       },
     },
     dataSync: {
@@ -213,6 +215,9 @@ function createFakePrisma() {
         const row = state.dataSync.find((sync) => sync.id === input.where.id);
         if (row) row.data = input.data;
         return row ?? null;
+      },
+      async updateMany() {
+        return { count: 0 };
       },
     },
   };

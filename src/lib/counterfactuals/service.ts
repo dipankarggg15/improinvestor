@@ -216,12 +216,13 @@ export async function getCounterfactualExperiment(client: PrismaClient, id: stri
 
 export async function loadCounterfactualMarketData(client: PrismaClient, startDate: Date, endDate: Date): Promise<CounterfactualMarketData> {
   const companies = await client.company.findMany({
+    where: { marketDataSource: "SYNTHETIC" },
     select: {
       id: true,
       name: true,
       isin: true,
       instruments: {
-        where: { active: true },
+        where: { active: true, marketDataSource: "SYNTHETIC" },
         select: { id: true, exchange: true, symbol: true },
       },
     },
@@ -244,6 +245,7 @@ export async function loadCounterfactualMarketData(client: PrismaClient, startDa
       where: {
         instrumentId: { in: candidates.map((candidate) => candidate.instrumentId) },
         tradingDate: { gte: earliest, lte: endDate },
+        marketDataSource: "SYNTHETIC",
       },
       orderBy: [{ instrumentId: "asc" }, { tradingDate: "asc" }],
       select: { instrumentId: true, tradingDate: true, open: true, low: true, close: true, volume: true },
@@ -252,6 +254,7 @@ export async function loadCounterfactualMarketData(client: PrismaClient, startDa
       where: {
         companyId: { in: candidates.map((candidate) => candidate.companyId) },
         asOfDate: { lte: endDate },
+        marketDataSource: "SYNTHETIC",
       },
       orderBy: [{ companyId: "asc" }, { asOfDate: "asc" }],
       select: { companyId: true, asOfDate: true, marketCap: true, debtToEquity: true },
@@ -262,8 +265,8 @@ export async function loadCounterfactualMarketData(client: PrismaClient, startDa
     prices: prices.map((price) => ({
       instrumentId: price.instrumentId,
       tradingDate: price.tradingDate,
-      open: price.open.toNumber(),
-      low: price.low.toNumber(),
+      open: price.open?.toNumber() ?? price.close.toNumber(),
+      low: price.low?.toNumber() ?? price.close.toNumber(),
       close: price.close.toNumber(),
       volume: Number(price.volume),
     })),

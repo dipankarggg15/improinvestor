@@ -27,7 +27,7 @@ async function searchEligibleInstruments(query: string) {
   const normalizedQuery = normalizeStockSearchText(query);
   if (normalizedQuery.length < 2) return [];
   const instruments = await prisma.instrument.findMany({
-    where: { active: true },
+    where: { active: true, marketDataSource: "SYNTHETIC" },
     orderBy: [{ company: { name: "asc" } }, { exchange: "desc" }, { symbol: "asc" }],
     select: {
       id: true,

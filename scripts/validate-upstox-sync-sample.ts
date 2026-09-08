@@ -1,7 +1,7 @@
 import "dotenv/config";
 
 import { createUpstoxMarketDataProviderCore } from "@/lib/market-data/providers/upstox-core";
-import { canonicalizeUpstoxEquities, latestCompletedEodDate, fiveYearStartDate } from "@/lib/market-data/upstox-sync";
+import { canonicalizeUpstoxEquities, latestCompletedEodDate, marketHistoryStartDate } from "@/lib/market-data/upstox-sync";
 
 const sampleSymbols = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "SBIN"];
 
@@ -12,7 +12,7 @@ async function main() {
   const instruments = await provider.fetchInstruments();
   const companies = canonicalizeUpstoxEquities(instruments);
   const endDate = latestCompletedEodDate();
-  const startDate = fiveYearStartDate(endDate);
+  const startDate = marketHistoryStartDate(endDate, 1);
   const samples = [];
 
   for (const symbol of sampleSymbols) {

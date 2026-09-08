@@ -192,12 +192,13 @@ export async function loadStrategyMarketSnapshot(
     ),
   );
   const companies = await client.company.findMany({
+    where: { marketDataSource: "SYNTHETIC" },
     select: {
       id: true,
       name: true,
       isin: true,
       instruments: {
-        where: { active: true },
+        where: { active: true, marketDataSource: "SYNTHETIC" },
         select: {
           id: true,
           exchange: true,
@@ -234,6 +235,7 @@ export async function loadStrategyMarketSnapshot(
           gte: earliestPriceDate,
           lte: runDate,
         },
+        marketDataSource: "SYNTHETIC",
       },
       orderBy: [{ instrumentId: "asc" }, { tradingDate: "asc" }],
       select: {
@@ -251,6 +253,7 @@ export async function loadStrategyMarketSnapshot(
         asOfDate: {
           lte: runDate,
         },
+        marketDataSource: "SYNTHETIC",
       },
       orderBy: [{ companyId: "asc" }, { asOfDate: "desc" }],
       select: {
