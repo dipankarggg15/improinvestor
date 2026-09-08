@@ -5,33 +5,45 @@ import { describe, expect, it } from "vitest";
 import { createUpstoxMarketDataProviderCore } from "@/lib/market-data/providers/upstox-core";
 
 describe("createUpstoxMarketDataProvider", () => {
-  it("filters the Upstox instrument master to NSE cash equities", async () => {
+  it("filters the Upstox instrument masters to NSE and BSE cash equities", async () => {
     const requests: string[] = [];
     const provider = createUpstoxMarketDataProviderCore({
       fetch: async (input) => {
         requests.push(String(input));
-        return gzipJsonResponse([
-          {
-            segment: "NSE_EQ",
-            instrument_type: "EQ",
-            instrument_key: "NSE_EQ|INE002A01018",
-            isin: "INE002A01018",
-            trading_symbol: "RELIANCE",
-            name: "Reliance Industries Limited",
-            exchange: "NSE",
-          },
-          {
-            segment: "NSE_FO",
-            instrument_type: "FUT",
-            instrument_key: "NSE_FO|12345",
-            isin: "INE002A01018",
-            trading_symbol: "RELIANCE",
-            name: "Reliance Industries Limited",
-            exchange: "NSE",
-          },
-        ]);
+        return gzipJsonResponse(String(input).includes("BSE")
+          ? [
+              {
+                segment: "BSE_EQ",
+                instrument_type: "A",
+                instrument_key: "BSE_EQ|INE002A01018",
+                isin: "INE002A01018",
+                trading_symbol: "500325",
+                name: "Reliance Industries Limited",
+                exchange: "BSE",
+              },
+            ]
+          : [
+              {
+                segment: "NSE_EQ",
+                instrument_type: "EQ",
+                instrument_key: "NSE_EQ|INE002A01018",
+                isin: "INE002A01018",
+                trading_symbol: "RELIANCE",
+                name: "Reliance Industries Limited",
+                exchange: "NSE",
+              },
+              {
+                segment: "NSE_FO",
+                instrument_type: "FUT",
+                instrument_key: "NSE_FO|12345",
+                isin: "INE002A01018",
+                trading_symbol: "RELIANCE",
+                name: "Reliance Industries Limited",
+                exchange: "NSE",
+              },
+            ]);
       },
-      instrumentMasterUrl: "https://assets.example.test/NSE.json.gz",
+      instrumentMasterUrls: ["https://assets.example.test/NSE.json.gz", "https://assets.example.test/BSE.json.gz"],
       token: "test-token",
     });
 
@@ -47,8 +59,19 @@ describe("createUpstoxMarketDataProvider", () => {
         instrumentType: "EQ",
         active: true,
       },
+      {
+        exchange: "BSE",
+        symbol: "500325",
+        tradingSymbol: "500325",
+        instrumentKey: "BSE_EQ|INE002A01018",
+        name: "Reliance Industries Limited",
+        isin: "INE002A01018",
+        segment: "BSE_EQ",
+        instrumentType: "A",
+        active: true,
+      },
     ]);
-    expect(requests).toEqual(["https://assets.example.test/NSE.json.gz"]);
+    expect(requests).toEqual(["https://assets.example.test/NSE.json.gz", "https://assets.example.test/BSE.json.gz"]);
   });
 
   it("normalizes Upstox daily historical candles", async () => {

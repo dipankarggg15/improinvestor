@@ -21,6 +21,8 @@
     "seed:counterfactuals": "tsx scripts/seed-counterfactuals.ts",
     "verify:market": "tsx scripts/verify-market.ts",
     "validate:upstox": "tsx scripts/validate-upstox-provider.ts",
+    "validate:upstox-sample": "tsx scripts/validate-upstox-sync-sample.ts",
+    "sync:upstox": "tsx scripts/sync-upstox-market.ts",
     "verify:strategies": "tsx scripts/verify-strategy-runs.ts",
     "check:production-config": "tsx scripts/check-production-config.ts",
     "postinstall": "prisma generate"

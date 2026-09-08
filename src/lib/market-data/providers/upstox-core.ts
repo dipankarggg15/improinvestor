@@ -3,13 +3,18 @@ import { gunzipSync } from "node:zlib";
 import type { MarketDataProvider, ProviderDailyCandle, ProviderInstrument, ProviderQuote } from "@/lib/market-data/types";
 
 const upstoxApiBaseUrl = "https://api.upstox.com/v3";
-const upstoxInstrumentMasterUrl = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz";
+const upstoxInstrumentMasterUrls = [
+  "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz",
+  "https://assets.upstox.com/market-quote/instruments/exchange/BSE.json.gz",
+];
+const nseCashEquityTypes = new Set(["EQ", "BE", "SM", "ST", "BZ"]);
+const bseCashEquityTypes = new Set(["A", "B", "E", "M", "MT", "P", "T", "X", "XT", "Z"]);
 
 type UpstoxProviderOptions = {
   readonly token?: string;
   readonly fetch?: typeof fetch;
   readonly apiBaseUrl?: string;
-  readonly instrumentMasterUrl?: string;
+  readonly instrumentMasterUrls?: readonly string[];
 };
 
 type UpstoxInstrument = {
@@ -36,19 +41,29 @@ export function createUpstoxMarketDataProviderCore(options: UpstoxProviderOption
   const token = options.token;
   const fetcher = options.fetch ?? fetch;
   const apiBaseUrl = options.apiBaseUrl ?? upstoxApiBaseUrl;
-  const instrumentMasterUrl = options.instrumentMasterUrl ?? upstoxInstrumentMasterUrl;
+  const instrumentMasterUrls = options.instrumentMasterUrls ?? upstoxInstrumentMasterUrls;
 
   return {
     name: "upstox",
     async fetchInstruments() {
-      const raw = await requestJson<unknown>(fetcher, instrumentMasterUrl, { compressed: true, token: null });
-      if (!Array.isArray(raw)) {
-        throw new Error("Upstox instrument master response was malformed.");
+      const rawResponses = await Promise.all(
+        instrumentMasterUrls.map((url) => requestJson<unknown>(fetcher, url, { compressed: true, token: null })),
+      );
+      const instruments: ProviderInstrument[] = [];
+
+      for (const raw of rawResponses) {
+        if (!Array.isArray(raw)) {
+          throw new Error("Upstox instrument master response was malformed.");
+        }
+
+        instruments.push(
+          ...raw
+            .map(parseCashEquity)
+            .filter((instrument): instrument is ProviderInstrument => instrument !== null),
+        );
       }
 
-      return raw
-        .map(parseNseCashEquity)
-        .filter((instrument): instrument is ProviderInstrument => instrument !== null);
+      return instruments;
     },
     async fetchHistoricalDailyCandles(input) {
       assertToken(token);
@@ -122,7 +137,7 @@ async function readCompressedJsonText(response: Response) {
   }
 }
 
-function parseNseCashEquity(raw: unknown): ProviderInstrument | null {
+function parseCashEquity(raw: unknown): ProviderInstrument | null {
   if (!isRecord(raw)) return null;
 
   const segment = valueAsString(raw.segment);
@@ -132,30 +147,44 @@ function parseNseCashEquity(raw: unknown): ProviderInstrument | null {
   const tradingSymbol = valueAsString(raw.trading_symbol);
   const name = valueAsString(raw.name);
   const exchange = valueAsString(raw.exchange);
+  const parsedExchange = exchange === "NSE" || exchange === "BSE" ? exchange : null;
 
   if (
-    segment !== "NSE_EQ" ||
-    instrumentType !== "EQ" ||
+    (segment !== "NSE_EQ" && segment !== "BSE_EQ") ||
+    !instrumentType ||
+    !isCashEquityType(segment, instrumentType) ||
     !instrumentKey ||
     !isin ||
     !tradingSymbol ||
     !name ||
-    exchange !== "NSE"
+    isExcludedNonEquityName(name) ||
+    !parsedExchange
   ) {
     return null;
   }
 
   return {
-    exchange: "NSE",
+    exchange: parsedExchange,
     symbol: tradingSymbol,
     tradingSymbol,
     instrumentKey,
     name,
     isin,
     segment,
-    instrumentType,
+    instrumentType: instrumentType,
     active: true,
   };
+}
+
+function isCashEquityType(segment: string | null, instrumentType: string | null) {
+  if (!instrumentType) return false;
+  if (segment === "NSE_EQ" && !nseCashEquityTypes.has(instrumentType)) return false;
+  if (segment === "BSE_EQ" && !bseCashEquityTypes.has(instrumentType)) return false;
+  return true;
+}
+
+function isExcludedNonEquityName(name: string) {
+  return /\b(ETF|GILT|MUTUAL FUND|NCD|DEBENTURE|BOND|SDL|TREASURY BILL|T-BILL)\b/i.test(name);
 }
 
 function parseDailyCandle(instrumentKey: string, raw: unknown): ProviderDailyCandle {
