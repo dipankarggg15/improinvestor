@@ -60,12 +60,12 @@ export default async function ScreenerPage({ searchParams }: ScreenerPageProps) 
   }
 
   return (
-    <section className="px-5 py-6 sm:px-8 lg:px-10">
-      <div className="max-w-7xl">
+    <section className="px-4 py-5 sm:px-6 lg:px-10">
+      <div className="max-w-full min-w-0 max-w-7xl">
         <div className="mb-6 flex flex-col gap-2">
           <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
           <h1 className="text-3xl font-semibold text-[var(--foreground)]">Custom Return Screener</h1>
-          <p className="max-w-3xl text-sm leading-6 text-[var(--muted)]">
+          <p className="max-w-full min-w-0 max-w-3xl text-sm leading-6 text-[var(--muted)]">
             Uses fictional development seed data only. This is not real Indian-market data and
             should not be used for investment decisions.
           </p>

@@ -26,7 +26,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           <p className="mt-2 text-sm text-[var(--muted)]">Private Investment Research System</p>
         </div>
 
-        <form action={loginAction} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5 shadow-sm">
+        <form action={loginAction} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5 shadow-sm">
           <input name="next" type="hidden" value={safeNextPath(params.next ?? "/")} />
           <label className="grid gap-2 text-sm font-medium">
             Email

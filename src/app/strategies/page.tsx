@@ -16,8 +16,8 @@ export default async function StrategiesPage() {
   });
 
   return (
-    <section className="px-5 py-6 sm:px-8 lg:px-10">
-      <div className="max-w-7xl">
+    <section className="px-4 py-5 sm:px-6 lg:px-10">
+      <div className="max-w-full min-w-0 max-w-7xl">
         <div className="mb-6">
           <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
           <h1 className="mt-2 text-3xl font-semibold">Strategies</h1>
@@ -30,7 +30,7 @@ export default async function StrategiesPage() {
 
             return (
               <Link
-                className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5 shadow-sm transition hover:border-[var(--accent)]"
+                className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5 shadow-sm transition hover:border-[var(--accent)]"
                 href={`/strategies/${strategy.id}`}
                 key={strategy.id}
               >
@@ -60,7 +60,7 @@ export default async function StrategiesPage() {
           })}
         </div>
         {strategies.length === 0 ? (
-          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5 text-sm text-[var(--muted)]">
+          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5 text-sm text-[var(--muted)]">
             No strategies seeded yet. Run <code>npm run seed:strategies</code>.
           </div>
         ) : null}

@@ -56,8 +56,8 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
   ]);
 
   return (
-    <section className="px-5 py-6 sm:px-8 lg:px-10">
-      <div className="max-w-7xl space-y-6">
+    <section className="px-4 py-5 sm:px-6 lg:px-10">
+      <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div>
           <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
           <h1 className="mt-2 text-3xl font-semibold">{strategy.name}</h1>
@@ -65,15 +65,15 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
             <h2 className="text-lg font-semibold">Current Rules</h2>
-            <pre className="mt-4 overflow-x-auto rounded-md bg-[var(--panel-soft)] p-4 text-xs leading-6">
+            <pre className="mt-4 max-w-full overflow-x-auto rounded-md bg-[var(--panel-soft)] p-4 text-xs leading-6">
               {config ? JSON.stringify(config, null, 2) : "No current version."}
             </pre>
           </div>
 
           <div className="space-y-4">
-            <form action={runStrategyAction} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+            <form action={runStrategyAction} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
               <input name="strategyId" type="hidden" value={strategy.id} />
               <label className="grid gap-2 text-sm font-medium">
                 Historical Run Date
@@ -92,7 +92,7 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
                 Run Current Version
               </ConfirmSubmitButton>
             </form>
-            <form action={cloneStrategyVersionAction} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+            <form action={cloneStrategyVersionAction} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
               <input name="strategyId" type="hidden" value={strategy.id} />
               <ConfirmSubmitButton
                 className="h-10 w-full rounded-md border border-[var(--border)] text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
@@ -105,7 +105,7 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
           </div>
         </div>
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Versions</h2>
           <div className="mt-4 grid gap-2 text-sm">
             {strategy.versions.map((version) => (
@@ -117,7 +117,7 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
           </div>
         </div>
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Current Holdings</h2>
@@ -126,7 +126,7 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
               </p>
             </div>
           </div>
-          <div className="mt-4 overflow-x-auto">
+          <div className="mt-4 max-w-full overflow-x-auto">
             <table className="w-full min-w-[980px] text-left text-sm">
               <thead className="text-xs uppercase text-[var(--muted)]">
                 <tr>
@@ -160,7 +160,7 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
         </div>
 
         {currentVersion && unassignedOpenEpisodes.length > 0 ? (
-          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
             <h2 className="text-lg font-semibold">Unassigned Open Holdings</h2>
             <div className="mt-4 grid gap-2 text-sm">
               {unassignedOpenEpisodes.map((episode) => (
@@ -185,9 +185,9 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
           </div>
         ) : null}
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Historical Runs</h2>
-          <div className="mt-4 overflow-x-auto">
+          <div className="mt-4 max-w-full overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="text-xs uppercase text-[var(--muted)]">
                 <tr>

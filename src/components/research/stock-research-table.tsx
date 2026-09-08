@@ -76,7 +76,7 @@ export function StockResearchTable({
   const visibleColumns = showReturn ? columns : columns.filter((column) => column.sortKey !== "return");
 
   return (
-    <div className="overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel)] shadow-sm">
+    <div className="max-w-full overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel)] shadow-sm">
       <table className="w-full min-w-[920px] border-collapse text-left text-sm">
         <thead className="bg-[var(--panel-soft)] text-xs uppercase text-[var(--muted)]">
           <tr>

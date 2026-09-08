@@ -15,8 +15,8 @@ export default async function CounterfactualLabPage() {
   ]);
 
   return (
-    <section className="px-5 py-6 sm:px-8 lg:px-10">
-      <div className="max-w-7xl space-y-6">
+    <section className="px-4 py-5 sm:px-6 lg:px-10">
+      <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div>
           <p className="text-sm font-medium text-[var(--accent)]">COUNTERFACTUAL / SIMULATED</p>
           <h1 className="mt-2 text-3xl font-semibold">Counterfactual Lab</h1>
@@ -25,9 +25,9 @@ export default async function CounterfactualLabPage() {
 
         <CounterfactualExperimentForm action={runCounterfactualExperimentAction} strategies={strategies} />
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Research History</h2>
-          <div className="mt-4 overflow-x-auto">
+          <div className="mt-4 max-w-full overflow-x-auto">
             <table className="w-full min-w-[900px] text-left text-sm">
               <thead className="text-xs uppercase text-[var(--muted)]">
                 <tr>{["Experiment", "Base", "Period", "Capital", "Variants", "Status"].map((head) => <th className="py-2 pr-3" key={head}>{head}</th>)}</tr>

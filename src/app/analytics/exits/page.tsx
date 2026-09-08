@@ -38,8 +38,8 @@ export default async function ExitAnalyticsPage({ searchParams }: ExitAnalyticsP
   const exitReasons = calculateExitReasonAnalytics(analyticsEpisodes);
 
   return (
-    <section className="px-5 py-6 sm:px-8 lg:px-10">
-      <div className="max-w-7xl space-y-6">
+    <section className="px-4 py-5 sm:px-6 lg:px-10">
+      <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
@@ -99,9 +99,9 @@ export default async function ExitAnalyticsPage({ searchParams }: ExitAnalyticsP
           ))}
         </div>
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Exit Reason Evidence</h2>
-          <div className="mt-4 overflow-x-auto">
+          <div className="mt-4 max-w-full overflow-x-auto">
             <table className="w-full min-w-[920px] text-left text-sm">
               <thead className="text-xs uppercase text-[var(--muted)]">
                 <tr>
@@ -125,8 +125,8 @@ export default async function ExitAnalyticsPage({ searchParams }: ExitAnalyticsP
           </div>
         </div>
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
-          <div className="overflow-x-auto">
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
+          <div className="max-w-full overflow-x-auto">
             <table className="w-full min-w-[1320px] text-left text-sm">
               <thead className="text-xs uppercase text-[var(--muted)]">
                 <tr>

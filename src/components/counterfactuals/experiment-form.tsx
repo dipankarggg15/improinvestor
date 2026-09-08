@@ -27,7 +27,7 @@ export function CounterfactualExperimentForm({
   );
 
   return (
-    <form action={action} className="grid gap-4 rounded-md border border-[var(--border)] bg-[var(--panel)] p-5 md:grid-cols-2 xl:grid-cols-4">
+    <form action={action} className="grid gap-4 rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-4">
       <label className="grid gap-2 text-sm font-medium">
         Strategy
         <select

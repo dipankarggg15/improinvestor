@@ -18,8 +18,8 @@ export default async function CounterfactualExperimentPage({ params }: PageProps
   const control = experiment.variants.find((variant) => variant.isControl)?.runs[0];
 
   return (
-    <section className="px-5 py-6 sm:px-8 lg:px-10">
-      <div className="max-w-7xl space-y-6">
+    <section className="px-4 py-5 sm:px-6 lg:px-10">
+      <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div>
           <p className="text-sm font-medium text-[var(--accent)]">COUNTERFACTUAL / SIMULATED</p>
           <h1 className="mt-2 text-3xl font-semibold">{experiment.name}</h1>
@@ -155,7 +155,7 @@ function delta(value: unknown, control: unknown) {
 }
 
 function Panel({ title, children }: { readonly title: string; readonly children: React.ReactNode }) {
-  return <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5"><h2 className="text-lg font-semibold">{title}</h2><div className="mt-4 overflow-x-auto">{children}</div></div>;
+  return <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5"><h2 className="text-lg font-semibold">{title}</h2><div className="mt-4 max-w-full overflow-x-auto">{children}</div></div>;
 }
 
 function MultiLineChart({ series }: { readonly series: readonly { readonly label: string; readonly values: readonly number[] }[] }) {

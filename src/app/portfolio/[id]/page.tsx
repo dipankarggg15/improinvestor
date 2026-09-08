@@ -59,8 +59,8 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
   );
 
   return (
-    <section className="px-5 py-6 sm:px-8 lg:px-10">
-      <div className="max-w-7xl space-y-6">
+    <section className="px-4 py-5 sm:px-6 lg:px-10">
+      <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
@@ -80,9 +80,9 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
           <Stat label="Return" value={formatPercent(valuation.totalReturnPercent.toNumber())} />
         </div>
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Closed Positions</h2>
-          <div className="mt-4 overflow-x-auto">
+          <div className="mt-4 max-w-full overflow-x-auto">
             <table className="w-full min-w-[1260px] text-left text-sm">
               <thead className="text-xs uppercase text-[var(--muted)]">
                 <tr>
@@ -121,9 +121,9 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
           {portfolioClosedEpisodes.length === 0 ? <p className="mt-3 text-sm text-[var(--muted)]">No closed position episodes yet.</p> : null}
         </div>
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Open Positions</h2>
-          <div className="mt-4 overflow-x-auto">
+          <div className="mt-4 max-w-full overflow-x-auto">
             <table className="w-full min-w-[1180px] text-left text-sm">
               <thead className="text-xs uppercase text-[var(--muted)]">
                 <tr>
@@ -171,7 +171,7 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
           {valuation.positions.length === 0 ? <p className="mt-3 text-sm text-[var(--muted)]">No open positions.</p> : null}
         </div>
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold">Reviews</h2>
             <form action={runReviewAction} className="flex flex-wrap gap-2">
@@ -186,7 +186,7 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
               </ConfirmSubmitButton>
             </form>
           </div>
-          <div className="mt-4 overflow-x-auto">
+          <div className="mt-4 max-w-full overflow-x-auto">
             <table className="w-full min-w-[980px] text-left text-sm">
               <thead className="text-xs uppercase text-[var(--muted)]">
                 <tr>
@@ -256,9 +256,9 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
           </div>
         </div>
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Trade History</h2>
-          <div className="mt-4 overflow-x-auto">
+          <div className="mt-4 max-w-full overflow-x-auto">
             <table className="w-full min-w-[920px] text-left text-sm">
               <thead className="text-xs uppercase text-[var(--muted)]">
                 <tr>

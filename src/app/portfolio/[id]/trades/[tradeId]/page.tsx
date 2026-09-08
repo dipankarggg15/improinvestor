@@ -26,8 +26,8 @@ export default async function TradeDetailPage({ params }: TradeDetailPageProps) 
   if (!trade) notFound();
 
   return (
-    <section className="px-5 py-6 sm:px-8 lg:px-10">
-      <div className="max-w-4xl space-y-6">
+    <section className="px-4 py-5 sm:px-6 lg:px-10">
+      <div className="max-w-full min-w-0 max-w-4xl space-y-6">
         <div>
           <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
           <h1 className="mt-2 text-3xl font-semibold">Trade Audit</h1>
@@ -36,7 +36,7 @@ export default async function TradeDetailPage({ params }: TradeDetailPageProps) 
           </p>
         </div>
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Execution</h2>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <Info label="Portfolio" value={trade.portfolio.name} />
@@ -56,7 +56,7 @@ export default async function TradeDetailPage({ params }: TradeDetailPageProps) 
         </div>
 
         {trade.strategyRun && trade.strategyCandidateSnapshot ? (
-          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-5">
+          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
             <h2 className="text-lg font-semibold">Strategy Source</h2>
             <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
               <Info label="Run Date" value={formatDate(trade.strategyRun.runDate)} />
