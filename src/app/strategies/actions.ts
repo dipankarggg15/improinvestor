@@ -14,18 +14,28 @@ import { createNextStrategyVersion, runCurrentStrategyVersion } from "@/lib/stra
 export async function runStrategyAction(strategyId: string, formData: FormData) {
   await requireOwner();
 
-  const runDateValue = String(formData.get("runDate") ?? "");
+  const startDateValue = String(formData.get("startDate") ?? formData.get("runDate") ?? "");
+  const endDateValue = String(formData.get("endDate") ?? "");
 
-  if (!strategyId || !/^\d{4}-\d{2}-\d{2}$/.test(runDateValue)) {
-    throw new Error("Strategy and run date are required.");
+  if (!strategyId || !/^\d{4}-\d{2}-\d{2}$/.test(startDateValue)) {
+    throw new Error("Strategy and start date are required.");
+  }
+
+  if (endDateValue && !/^\d{4}-\d{2}-\d{2}$/.test(endDateValue)) {
+    throw new Error("End date must be a valid date.");
+  }
+
+  if (endDateValue && endDateValue <= startDateValue) {
+    throw new Error("End Date must be after Start Date.");
   }
 
   const run = await runCurrentStrategyVersion({
     strategyId,
-    runDate: new Date(`${runDateValue}T00:00:00.000Z`),
+    runDate: new Date(`${startDateValue}T00:00:00.000Z`),
   });
 
-  redirect(`/strategies/${strategyId}/runs/${run.id}`);
+  const endDateQuery = endDateValue ? `?endDate=${encodeURIComponent(endDateValue)}` : "";
+  redirect(`/strategies/${strategyId}/runs/${run.id}${endDateQuery}`);
 }
 
 export async function runEarlySuperstarsHistoricalAction(strategyId: string, formData: FormData) {

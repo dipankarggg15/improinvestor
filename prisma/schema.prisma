@@ -237,6 +237,7 @@ model DailyPrice {
   @@index([instrumentId, tradingDate])
   @@index([tradingDate])
   @@index([marketDataSource, tradingDate])
+  @@index([marketDataSource, instrumentId, tradingDate])
 }
 
 model CompanyFundamentals {

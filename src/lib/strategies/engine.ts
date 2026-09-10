@@ -139,11 +139,22 @@ function evaluateCandidate(input: {
   );
   const failureReasons: StrategyCandidateFailureReason[] = [];
 
-  if (!input.fundamentals || input.fundamentals.marketCap === null || input.fundamentals.debtToEquity === null) {
+  const requiresMarketCap = input.config.eligibility.marketCap !== undefined;
+  const requiresDebtToEquity = input.config.eligibility.debtToEquity !== undefined;
+
+  if (
+    (requiresMarketCap && (!input.fundamentals || input.fundamentals.marketCap === null)) ||
+    (requiresDebtToEquity && (!input.fundamentals || input.fundamentals.debtToEquity === null))
+  ) {
     failureReasons.push("MISSING_FUNDAMENTALS");
   }
 
-  if (Object.values(returns).some((value) => value === null)) {
+  const requiredReturnMetrics = new Set<ReturnMetricKey>([
+    ...Object.keys(input.config.eligibility.returns ?? {}) as ReturnMetricKey[],
+    ...(input.config.ranking.metric.startsWith("return") ? [input.config.ranking.metric as ReturnMetricKey] : []),
+  ]);
+
+  if ([...requiredReturnMetrics].some((metric) => returns[metric] === null)) {
     failureReasons.push("INSUFFICIENT_PRICE_HISTORY");
   }
 

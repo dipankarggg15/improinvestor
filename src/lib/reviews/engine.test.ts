@@ -11,7 +11,7 @@ const crore = 10_000_000;
 describe("strategy review engine", () => {
   it("keeps Momentum 10 HOLD during the one-month grace period", () => {
     const result = evaluateReviewPosition({
-      strategyName: "Momentum 10",
+      strategyName: "Momentum 10 - Price Only",
       reviewType: "SCHEDULED",
       reviewDate: date("2025-01-20"),
       position: position("company-31", "instrument-31", "2025-01-10"),
@@ -24,14 +24,14 @@ describe("strategy review engine", () => {
 
   it("keeps Momentum 10 rank 30 and sells rank 31 after grace", () => {
     const hold = evaluateReviewPosition({
-      strategyName: "Momentum 10",
+      strategyName: "Momentum 10 - Price Only",
       reviewType: "SCHEDULED",
       reviewDate: date("2025-03-01"),
       position: position("company-30", "instrument-30", "2025-01-10"),
       snapshot: rankedSnapshot(31),
     });
     const sell = evaluateReviewPosition({
-      strategyName: "Momentum 10",
+      strategyName: "Momentum 10 - Price Only",
       reviewType: "SCHEDULED",
       reviewDate: date("2025-03-01"),
       position: position("company-31", "instrument-31", "2025-01-10"),
@@ -47,7 +47,7 @@ describe("strategy review engine", () => {
   it("sells Momentum 10 when core qualification fails and keeps holding rank separate from entry ranking", () => {
     const snapshot = rankedSnapshot(5, { failCompanyId: "company-1" });
     const result = evaluateReviewPosition({
-      strategyName: "Momentum 10",
+      strategyName: "Momentum 10 - Price Only",
       reviewType: "SCHEDULED",
       reviewDate: date("2025-03-01"),
       position: position("company-1", "instrument-1", "2025-01-10"),
@@ -156,21 +156,24 @@ function rankedSnapshot(count: number, options: { failCompanyId?: string; oneMon
       marketCap: candidate.companyId === options.failCompanyId ? 400 * crore : 3_000 * crore,
       debtToEquity: 1,
     })),
-    prices: candidates.flatMap((candidate, index) => prices(candidate.instrumentId, index, options.oneMonthBase ?? 60)),
+    prices: candidates.flatMap((candidate, index) =>
+      prices(candidate.instrumentId, index, options.oneMonthBase ?? 60, candidate.companyId === options.failCompanyId),
+    ),
   };
 }
 
-function prices(instrumentId: string, index: number, oneMonthBase: number) {
+function prices(instrumentId: string, index: number, oneMonthBase: number, lowLiquidity = false) {
   const end = 100;
+  const volume = lowLiquidity ? 100_000 : 1_000_000;
   return [
-    { instrumentId, tradingDate: date("2024-12-01"), close: 40, volume: 1_000_000 },
-    { instrumentId, tradingDate: date("2024-03-01"), close: 50, volume: 1_000_000 },
-    { instrumentId, tradingDate: date("2025-01-01"), close: 50 + index, volume: 1_000_000 },
-    { instrumentId, tradingDate: date("2025-01-29"), close: oneMonthBase + index, volume: 1_000_000 },
-    { instrumentId, tradingDate: date("2025-03-01"), close: end, volume: 1_000_000 },
-    { instrumentId, tradingDate: date("2025-03-30"), close: end, volume: 1_000_000 },
-    { instrumentId, tradingDate: date("2025-04-01"), close: end, volume: 1_000_000 },
-    { instrumentId, tradingDate: date("2025-05-01"), close: 10_000, volume: 1_000_000 },
+    { instrumentId, tradingDate: date("2024-12-01"), close: 40, volume },
+    { instrumentId, tradingDate: date("2024-03-01"), close: 50, volume },
+    { instrumentId, tradingDate: date("2025-01-01"), close: 50 + index, volume },
+    { instrumentId, tradingDate: date("2025-01-29"), close: oneMonthBase + index, volume },
+    { instrumentId, tradingDate: date("2025-03-01"), close: end, volume },
+    { instrumentId, tradingDate: date("2025-03-30"), close: end, volume },
+    { instrumentId, tradingDate: date("2025-04-01"), close: end, volume },
+    { instrumentId, tradingDate: date("2025-05-01"), close: 10_000, volume },
   ];
 }
 

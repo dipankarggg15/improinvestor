@@ -10,7 +10,7 @@ const demoPrefix = "PHASE7_DEMO:";
 
 async function main() {
   const [momentum, early] = await Promise.all([
-    prisma.portfolio.findFirstOrThrow({ where: { name: "Momentum 10 Synthetic Portfolio" } }),
+    prisma.portfolio.findFirstOrThrow({ where: { name: "Momentum 10 Price Only Synthetic Portfolio" } }),
     prisma.portfolio.findFirstOrThrow({ where: { name: "Early Superstars Synthetic Portfolio" } }),
   ]);
 

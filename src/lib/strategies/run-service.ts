@@ -1,6 +1,6 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { MarketDataSource, Prisma, PrismaClient } from "@prisma/client";
 
-import { parseStrategyConfig, type StrategyConfig } from "@/lib/strategies/config";
+import { parseStrategyConfig, strategyConfigForDisplay, type ReturnMetricKey, type StrategyConfig } from "@/lib/strategies/config";
 import { getLiquidityStartDate, getStandardMetricDateTargets } from "@/lib/strategies/dates";
 import {
   evaluateStrategy,
@@ -9,6 +9,10 @@ import {
   type StrategyPricePoint,
 } from "@/lib/strategies/engine";
 import { getNextStrategyVersionNumber } from "@/lib/strategies/versioning";
+
+const priceLoadBatchSize = 250;
+const priceLoadConcurrency = 4;
+const maxPriceLoadAttempts = 3;
 
 export async function runCurrentStrategyVersion(input: {
   readonly strategyId: string;
@@ -67,8 +71,11 @@ export async function runStrategyVersion(input: {
     where: {
       id: input.strategyVersionId,
     },
+    include: {
+      strategy: true,
+    },
   });
-  const config = parseStrategyConfig(version.config);
+  const config = strategyConfigForDisplay(version.strategy.name, version.config);
   const [snapshot, activeHoldings] = await Promise.all([
     loadStrategyMarketSnapshot(client, config, input.runDate),
     client.positionEpisode.findMany({
@@ -132,7 +139,7 @@ export async function runStrategyVersion(input: {
     });
 
     return run;
-  });
+  }, { timeout: 120_000 });
 }
 
 export async function createNextStrategyVersion(input: {
@@ -185,20 +192,22 @@ export async function loadStrategyMarketSnapshot(
 ) {
   const targets = getStandardMetricDateTargets(runDate);
   const liquidityStart = getLiquidityStartDate(runDate, config.liquidity.lookback);
+  const requiredMetricDates = requiredReturnMetricDates(config, targets);
   const earliestPriceDate = new Date(
     Math.min(
-      ...Object.values(targets).map((date) => date.getTime()),
+      ...(requiredMetricDates.length > 0 ? requiredMetricDates : Object.values(targets)).map((date) => date.getTime()),
       liquidityStart.getTime(),
     ),
   );
+  const marketDataSource = await selectStrategyMarketDataSource(client);
   const companies = await client.company.findMany({
-    where: { marketDataSource: "SYNTHETIC" },
+    where: { marketDataSource },
     select: {
       id: true,
       name: true,
       isin: true,
       instruments: {
-        where: { active: true, marketDataSource: "SYNTHETIC" },
+        where: { active: true, marketDataSource },
         select: {
           id: true,
           exchange: true,
@@ -226,24 +235,11 @@ export async function loadStrategyMarketSnapshot(
     })
     .filter((candidate): candidate is StrategyEngineCandidate => candidate !== null);
   const [prices, fundamentals] = await Promise.all([
-    client.dailyPrice.findMany({
-      where: {
-        instrumentId: {
-          in: candidates.map((candidate) => candidate.instrumentId),
-        },
-        tradingDate: {
-          gte: earliestPriceDate,
-          lte: runDate,
-        },
-        marketDataSource: "SYNTHETIC",
-      },
-      orderBy: [{ instrumentId: "asc" }, { tradingDate: "asc" }],
-      select: {
-        instrumentId: true,
-        tradingDate: true,
-        close: true,
-        volume: true,
-      },
+    loadDailyPrices(client, {
+      instrumentIds: candidates.map((candidate) => candidate.instrumentId),
+      startDate: earliestPriceDate,
+      endDate: runDate,
+      marketDataSource,
     }),
     client.companyFundamentals.findMany({
       where: {
@@ -253,7 +249,7 @@ export async function loadStrategyMarketSnapshot(
         asOfDate: {
           lte: runDate,
         },
-        marketDataSource: "SYNTHETIC",
+        marketDataSource,
       },
       orderBy: [{ companyId: "asc" }, { asOfDate: "desc" }],
       select: {
@@ -284,6 +280,104 @@ export async function loadStrategyMarketSnapshot(
       }),
     ),
   };
+}
+
+async function selectStrategyMarketDataSource(client: PrismaClient): Promise<MarketDataSource> {
+  const syntheticCompanyCount = await client.company.count({ where: { marketDataSource: "SYNTHETIC" } });
+  return syntheticCompanyCount > 0 ? "SYNTHETIC" : "UPSTOX_REAL";
+}
+
+function requiredReturnMetricDates(
+  config: StrategyConfig,
+  targets: Record<ReturnMetricKey, Date>,
+) {
+  const metrics = new Set<ReturnMetricKey>([
+    ...Object.keys(config.eligibility.returns ?? {}) as ReturnMetricKey[],
+    ...(config.ranking.metric.startsWith("return") ? [config.ranking.metric as ReturnMetricKey] : []),
+  ]);
+
+  return [...metrics].map((metric) => targets[metric]);
+}
+
+async function loadDailyPrices(
+  client: PrismaClient,
+  input: {
+    readonly instrumentIds: readonly string[];
+    readonly startDate: Date;
+    readonly endDate: Date;
+    readonly marketDataSource: MarketDataSource;
+  },
+) {
+  const batches = chunk(input.instrumentIds, priceLoadBatchSize);
+  const priceBatches = await mapWithConcurrency(batches, priceLoadConcurrency, (instrumentIds) =>
+    loadWithRetry(() => client.dailyPrice.findMany({
+      where: {
+        instrumentId: { in: instrumentIds },
+        tradingDate: { gte: input.startDate, lte: input.endDate },
+        marketDataSource: input.marketDataSource,
+      },
+      orderBy: [{ instrumentId: "asc" }, { tradingDate: "asc" }],
+      select: {
+        instrumentId: true,
+        tradingDate: true,
+        close: true,
+        volume: true,
+      },
+    })),
+  );
+
+  return priceBatches.flat();
+}
+
+async function loadWithRetry<T>(load: () => Promise<T>) {
+  for (let attempt = 1; attempt <= maxPriceLoadAttempts; attempt += 1) {
+    try {
+      return await load();
+    } catch (error) {
+      if (attempt === maxPriceLoadAttempts || !isPrismaConnectionClosedError(error)) throw error;
+      await delay(attempt * 500);
+    }
+  }
+
+  throw new Error("Price load failed.");
+}
+
+function isPrismaConnectionClosedError(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "P1017";
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function chunk<T>(items: readonly T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function mapWithConcurrency<T, TResult>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<TResult>,
+) {
+  const results: TResult[] = [];
+  let nextIndex = 0;
+
+  async function worker() {
+    for (;;) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index];
+      if (item === undefined) return;
+      results[index] = await mapper(item);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
 }
 
 function toDecimalString(value: number | null, decimals: number) {

@@ -59,7 +59,7 @@ export function evaluateReviewPosition(input: {
   readonly position: ValuedPosition;
   readonly snapshot: StrategyMarketSnapshot;
 }): ReviewSnapshotResult {
-  if (input.strategyName === "Momentum 10") {
+  if (isMomentum10Strategy(input.strategyName)) {
     return evaluateMomentum10(input);
   }
 
@@ -68,6 +68,10 @@ export function evaluateReviewPosition(input: {
   }
 
   throw new Error(`No review evaluator is registered for strategy: ${input.strategyName}`);
+}
+
+function isMomentum10Strategy(name: string) {
+  return name === "Momentum 10 - Price Only" || name === "Momentum 10";
 }
 
 export function momentum10HoldingConfig(): StrategyConfig {

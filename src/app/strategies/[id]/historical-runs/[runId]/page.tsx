@@ -2,7 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { prisma } from "@/lib/db/prisma";
-import { getHistoricalStrategyRun } from "@/lib/strategies/historical-run-service";
+import {
+  completeEarlySuperstarsHistoricalRun,
+  entryMomentumLabelForEarlySuperstarsVariant,
+  getHistoricalStrategyRun,
+  isEarlySuperstarsHistoricalStrategy,
+  isMomentum10HistoricalStrategy,
+} from "@/lib/strategies/historical-run-service";
 import { formatCurrency, formatDate, formatPercent, formatQuantity } from "@/lib/ui/format";
 
 export const dynamic = "force-dynamic";
@@ -13,23 +19,33 @@ export default async function HistoricalStrategyRunPage({
   readonly params: Promise<{ readonly id: string; readonly runId: string }>;
 }) {
   const { id, runId } = await params;
+  await completeRunningMomentum10Run({ strategyId: id, runId });
   const run = await getHistoricalStrategyRun({ client: prisma, strategyId: id, runId });
 
   if (!run) notFound();
 
   const events = run.events.slice(0, 500);
+  const entryMomentumLabel = isEarlySuperstarsHistoricalStrategy(run.strategy.name)
+    ? entryMomentumLabelForEarlySuperstarsVariant(run.strategy.name, run.strategyVersion.config)
+    : isMomentum10HistoricalStrategy(run.strategy.name)
+      ? "1M"
+      : "Entry";
+  const strategyDisplayName = isEarlySuperstarsHistoricalStrategy(run.strategy.name)
+    ? `Early Superstars - ${entryMomentumLabel} Entry`
+    : run.strategy.name;
 
   return (
     <section className="px-4 py-5 sm:px-6 lg:px-10">
+      {run.status === "RUNNING" ? <meta content="10" httpEquiv="refresh" /> : null}
       <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div>
           <Link className="text-sm font-medium text-[var(--accent)] hover:underline" href={`/strategies/${run.strategyId}`}>
-            {run.strategy.name}
+            {strategyDisplayName}
           </Link>
           <p className="mt-3 text-sm font-medium text-[var(--accent)]">REAL MARKET DATA</p>
           <h1 className="mt-2 text-3xl font-semibold">Automated Historical Run</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--muted)]">
-            V{run.strategyVersion.versionNumber}, requested {formatDate(run.requestedStartDate)} to {formatDate(run.requestedEndDate)}.
+            V{run.strategyVersion.versionNumber} {run.strategyVersion.label ? `(${run.strategyVersion.label})` : ""}, requested {formatDate(run.requestedStartDate)} to {formatDate(run.requestedEndDate)}.
             Effective simulation window {run.effectiveStartDate ? formatDate(run.effectiveStartDate) : "-"} to {run.effectiveEndDate ? formatDate(run.effectiveEndDate) : "-"}.
           </p>
         </div>
@@ -43,9 +59,21 @@ export default async function HistoricalStrategyRunPage({
           <Stat label="Initial Positions" value={String(run.initialPositionCount)} />
           <Stat label="Trades" value={String(run.tradeCount)} />
           <Stat label="Stop Exits" value={String(run.stopLossExitCount)} />
-          <Stat label="Monthly Exits" value={String(run.monthlyRankExitCount)} />
+          <Stat label="Rank Failures" value={String(run.monthlyRankExitCount)} />
           <Stat label="Open At End" value={String(run.endingOpenPositionCount)} />
         </div>
+
+        {run.status === "RUNNING" ? (
+          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 text-sm text-[var(--muted)] sm:p-5">
+            This historical run is still processing. The page will refresh automatically.
+          </div>
+        ) : null}
+
+        {run.status === "FAILED" ? (
+          <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800 sm:p-5">
+            {run.errorMessage ?? "This historical run failed."}
+          </div>
+        ) : null}
 
         <InfoBlock
           title="Unavailable Historical Filters"
@@ -60,10 +88,10 @@ export default async function HistoricalStrategyRunPage({
         <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Position History</h2>
           <div className="mt-4 max-w-full overflow-x-auto">
-            <table className="w-full min-w-[1280px] text-left text-sm">
+            <table className="w-full min-w-[1380px] text-left text-sm">
               <thead className="text-xs uppercase text-[var(--muted)]">
                 <tr>
-                  {["Stock", "Entry", "Qty", "Entry Rank", "Stop Trigger", "Reviews", "Exit", "Realized", "Status"].map((head) => (
+                  {["Stock", "Entry", "Qty", "Entry Rank", "Stop Trigger", "Reviews", "Exit", "Realized", "If Held To End", "Status"].map((head) => (
                     <th className="py-2 pr-3" key={head}>{head}</th>
                   ))}
                 </tr>
@@ -82,7 +110,7 @@ export default async function HistoricalStrategyRunPage({
                     <td className="py-3 pr-3">{formatQuantity(position.quantity.toNumber())}</td>
                     <td className="py-3 pr-3">
                       <span className="block">{position.entryRank ?? "-"}</span>
-                      <span className="text-xs text-[var(--muted)]">1W {formatPercent(position.entryReturn1W?.toNumber())}</span>
+                      <span className="text-xs text-[var(--muted)]">{entryMomentumLabel} {formatPercent(position.entryReturn1W?.toNumber())}</span>
                     </td>
                     <td className="py-3 pr-3">
                       {position.stopTriggerDate ? (
@@ -104,6 +132,7 @@ export default async function HistoricalStrategyRunPage({
                       ) : "-"}
                     </td>
                     <td className="py-3 pr-3">{formatPercent(position.realizedReturnPercent?.toNumber())}</td>
+                    <td className="py-3 pr-3">{formatOptionalPercent(position.returnIfHeldToEndPercent)}</td>
                     <td className="py-3 pr-3">{position.status}</td>
                   </tr>
                 ))}
@@ -172,6 +201,20 @@ export default async function HistoricalStrategyRunPage({
   );
 }
 
+async function completeRunningMomentum10Run(input: { readonly strategyId: string; readonly runId: string }) {
+  const run = await prisma.historicalStrategyRun.findFirst({
+    where: { id: input.runId, strategyId: input.strategyId, status: "RUNNING" },
+    select: {
+      id: true,
+      strategy: { select: { name: true } },
+    },
+  });
+
+  if (!run || !isMomentum10HistoricalStrategy(run.strategy.name)) return;
+
+  await completeEarlySuperstarsHistoricalRun({ client: prisma, runId: run.id });
+}
+
 function Stat({ label, value }: { readonly label: string; readonly value: string }) {
   return (
     <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4">
@@ -201,7 +244,9 @@ function ReviewList({ value }: { readonly value: unknown }) {
         const item = review && typeof review === "object" ? review as Record<string, unknown> : {};
         return (
           <span key={`${String(item.reviewDate)}-${index}`}>
-            {String(item.reviewDate ?? "-")}: {String(item.decision ?? "-")} rank {String(item.rank ?? "-")}
+            {String(item.reviewDate ?? "-")}: {String(item.decision ?? "-")} since-entry rank {String(item.rank ?? "-")}
+            {item.threshold ? `/${String(item.threshold)}` : ""}, return {formatPercent(numberOrNull(item.sinceEntryReturn))}
+            {item.windowCalendarDays ? `, age ${String(item.windowCalendarDays)}d` : ""}
           </span>
         );
       })}
@@ -217,4 +262,12 @@ function companyLabel(companyId: string | null, positions: readonly { readonly c
 
 function jsonArray(value: unknown) {
   return Array.isArray(value) ? value.map(String) : [];
+}
+
+function formatOptionalPercent(value: number | null | undefined) {
+  return value === null || value === undefined ? "N/A" : formatPercent(value);
+}
+
+function numberOrNull(value: unknown) {
+  return typeof value === "number" ? value : null;
 }

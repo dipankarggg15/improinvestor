@@ -15,7 +15,7 @@ async function main() {
       client: prisma,
       name: "Momentum 10 Holding Rank Threshold",
       description: "Compare the Momentum 10 holding-rank exit threshold under identical simulated execution assumptions.",
-      strategyName: "Momentum 10",
+      strategyName: "Momentum 10 - Price Only",
       startDate,
       endDate,
       initialCapital,

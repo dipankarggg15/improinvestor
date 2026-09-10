@@ -56,7 +56,7 @@ function labelFor(parameter: string) {
 }
 
 function controlName(strategyName: string, parameter: string) {
-  if (strategyName === "Momentum 10" && parameter === "momentum.holdingRankThreshold") return "CONTROL Top30";
+  if ((strategyName === "Momentum 10 - Price Only" || strategyName === "Momentum 10") && parameter === "momentum.holdingRankThreshold") return "CONTROL Top30";
   if (strategyName === "Early Superstars" && parameter === "early.phase2RankThreshold") return "CONTROL Top30";
   if (strategyName === "Early Superstars" && parameter === "early.emergencyStopPercent") return "CONTROL -15%";
   return "CONTROL";

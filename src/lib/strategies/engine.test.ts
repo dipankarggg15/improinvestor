@@ -20,13 +20,13 @@ describe("strategy config validation", () => {
 
 describe("evaluateStrategy", () => {
   it("applies Momentum 10 exact eligibility rules and ascending ranking", () => {
-    const result = evaluateStrategy(momentum10V1Config, date("2025-12-31"), fixtureSnapshot());
+    const result = evaluateStrategy(momentum10V1Config, date("2025-12-31"), momentumFixtureSnapshot());
 
-    expect(result.evaluatedCount).toBe(19);
+    expect(result.evaluatedCount).toBe(18);
     expect(result.eligibleCount).toBeGreaterThan(10);
     expect(result.selectedCount).toBe(10);
-    expect(result.candidates.find((candidate) => candidate.symbol === "CAP500")?.failureReasons).toContain("MARKET_CAP_TOO_LOW");
-    expect(result.candidates.find((candidate) => candidate.symbol === "DEBT2")?.failureReasons).toContain("DEBT_EQUITY_TOO_HIGH");
+    expect(result.candidates.find((candidate) => candidate.symbol === "CAP500")?.failureReasons).not.toContain("MARKET_CAP_TOO_LOW");
+    expect(result.candidates.find((candidate) => candidate.symbol === "DEBT2")?.failureReasons).not.toContain("DEBT_EQUITY_TOO_HIGH");
     expect(result.candidates.find((candidate) => candidate.symbol === "RET50")?.failureReasons).toContain("RETURN_3M_TOO_LOW");
     expect(result.candidates.find((candidate) => candidate.symbol === "LOWLIQ")?.failureReasons).toContain("LIQUIDITY_TOO_LOW");
 
@@ -78,7 +78,7 @@ describe("evaluateStrategy", () => {
   });
 
   it("does not select companies already held by the same strategy version", () => {
-    const snapshot = fixtureSnapshot();
+    const snapshot = momentumFixtureSnapshot();
     const heldCompanyId = snapshot.candidates[0]?.companyId;
     const result = evaluateStrategy(momentum10V1Config, date("2025-12-31"), snapshot, {
       activeHoldingCompanyIds: new Set(heldCompanyId ? [heldCompanyId] : []),
@@ -104,7 +104,7 @@ describe("evaluateStrategy", () => {
 
   it("reports missing price history and missing fundamentals", () => {
     const snapshot = fixtureSnapshot(2);
-    const result = evaluateStrategy(momentum10V1Config, date("2025-12-31"), {
+    const result = evaluateStrategy(fundamentalConfig(), date("2025-12-31"), {
       candidates: [
         snapshot.candidates[0],
         { ...snapshot.candidates[1], companyId: "missing-fundamentals", instrumentId: "missing-prices" },
@@ -121,7 +121,7 @@ describe("evaluateStrategy", () => {
   it("uses historical fundamentals only on or before run date", () => {
     const snapshot = fixtureSnapshot(1);
     const candidate = snapshot.candidates[0];
-    const result = evaluateStrategy(momentum10V1Config, date("2025-12-31"), {
+    const result = evaluateStrategy(fundamentalConfig(), date("2025-12-31"), {
       ...snapshot,
       fundamentals: [
         { companyId: candidate.companyId, asOfDate: date("2025-11-01"), marketCap: 400 * crore, debtToEquity: 0.5 },
@@ -133,7 +133,7 @@ describe("evaluateStrategy", () => {
   });
 
   it("stores decision metrics on candidate evaluations", () => {
-    const result = evaluateStrategy(momentum10V1Config, date("2025-12-31"), fixtureSnapshot(1));
+    const result = evaluateStrategy(momentum10V1Config, date("2025-12-31"), momentumFixtureSnapshot(1));
     const candidate = result.candidates[0];
 
     expect(candidate?.marketCap).toBeTypeOf("number");
@@ -171,6 +171,44 @@ function fixtureSnapshot(qualifierCount = 11): StrategyMarketSnapshot {
   };
 }
 
+function momentumFixtureSnapshot(qualifierCount = 11): StrategyMarketSnapshot {
+  const candidates = [
+    ...Array.from({ length: qualifierCount }, (_, index) => makeCandidate(`winner-${index}`, `WIN${index}`)),
+    makeCandidate("cap500", "CAP500"),
+    makeCandidate("cap1999", "CAP1999"),
+    makeCandidate("debt2", "DEBT2"),
+    makeCandidate("ret50", "RET50"),
+    makeCandidate("low1m", "LOW1M"),
+    makeCandidate("hot1m", "HOT1M"),
+    makeCandidate("lowliq", "LOWLIQ"),
+  ];
+
+  return {
+    candidates,
+    fundamentals: candidates.flatMap((candidate) => {
+      const marketCap =
+        candidate.symbol === "CAP500" ? 500 * crore : candidate.symbol === "CAP1999" ? 1_999 * crore : 3_000 * crore;
+      const debtToEquity = candidate.symbol === "DEBT2" ? 2 : 1.2;
+      return [
+        { companyId: candidate.companyId, asOfDate: date("2025-10-01"), marketCap, debtToEquity },
+        { companyId: candidate.companyId, asOfDate: date("2026-01-01"), marketCap: 10_000 * crore, debtToEquity: 0 },
+      ];
+    }),
+    prices: candidates.flatMap((candidate, index) => makeMomentumPrices(candidate.instrumentId, candidate.symbol, index)),
+  };
+}
+
+function fundamentalConfig(): StrategyConfig {
+  return {
+    ...momentum10V1Config,
+    eligibility: {
+      ...momentum10V1Config.eligibility,
+      marketCap: { gt: 500 * crore },
+      debtToEquity: { lt: 2 },
+    },
+  };
+}
+
 function makeCandidate(companyId: string, symbol: string) {
   return {
     companyId,
@@ -198,6 +236,24 @@ function makePrices(instrumentId: string, symbol: string, index: number) {
     { instrumentId, tradingDate: date("2025-09-30"), close: sixMonth, volume },
     { instrumentId, tradingDate: date("2025-11-30"), close: threeMonth, volume },
     { instrumentId, tradingDate: date("2025-12-24"), close: oneMonth, volume },
+    { instrumentId, tradingDate: date("2025-12-31"), close: end, volume },
+    { instrumentId, tradingDate: date("2026-01-05"), close: 1_000, volume },
+  ];
+}
+
+function makeMomentumPrices(instrumentId: string, symbol: string, index: number) {
+  const end = symbol === "HOT1M" ? 140 : 120;
+  const threeMonth = symbol === "RET50" ? 80 : 70 - index * 0.2;
+  const oneMonth = symbol === "LOW1M" ? 117 : symbol === "HOT1M" ? 70 : 110 - index * 0.1;
+  const volume = symbol === "LOWLIQ" ? 1_000 : 1_000_000;
+
+  return [
+    { instrumentId, tradingDate: date("2024-12-31"), close: 100, volume },
+    { instrumentId, tradingDate: date("2025-06-30"), close: 100, volume },
+    { instrumentId, tradingDate: date("2025-09-30"), close: threeMonth, volume },
+    { instrumentId, tradingDate: date("2025-10-01"), close: threeMonth, volume },
+    { instrumentId, tradingDate: date("2025-11-30"), close: oneMonth, volume },
+    { instrumentId, tradingDate: date("2025-12-24"), close: 100, volume },
     { instrumentId, tradingDate: date("2025-12-31"), close: end, volume },
     { instrumentId, tradingDate: date("2026-01-05"), close: 1_000, volume },
   ];

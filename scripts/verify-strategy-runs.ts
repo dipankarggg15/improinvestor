@@ -6,7 +6,7 @@ import { runCurrentStrategyVersion } from "../src/lib/strategies/run-service";
 
 const prisma = new PrismaClient();
 const verificationRuns = [
-  { strategyName: "Momentum 10", runDate: new Date("2025-03-31T00:00:00.000Z") },
+  { strategyName: "Momentum 10 - Price Only", runDate: new Date("2025-03-31T00:00:00.000Z") },
   { strategyName: "Early Superstars", runDate: new Date("2025-12-31T00:00:00.000Z") },
 ];
 

@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 
 async function main() {
   const momentum = await prisma.portfolio.findFirstOrThrow({
-    where: { name: "Momentum 10 Synthetic Portfolio" },
+    where: { name: "Momentum 10 Price Only Synthetic Portfolio" },
   });
   const early = await prisma.portfolio.findFirstOrThrow({
     where: { name: "Early Superstars Synthetic Portfolio" },

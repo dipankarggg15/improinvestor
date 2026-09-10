@@ -10,7 +10,7 @@ const initialCapital = "1000000.00";
 const demoPrefix = "PHASE5_DEMO:";
 
 async function main() {
-  const momentum = await portfolioForStrategy("Momentum 10", "Momentum 10 Synthetic Portfolio");
+  const momentum = await portfolioForStrategy("Momentum 10 - Price Only", "Momentum 10 Price Only Synthetic Portfolio");
   const early = await portfolioForStrategy("Early Superstars", "Early Superstars Synthetic Portfolio");
 
   await prisma.trade.deleteMany({
@@ -20,7 +20,7 @@ async function main() {
     },
   });
 
-  const momentumRun = await runFor("Momentum 10", "2025-03-31");
+  const momentumRun = await runFor("Momentum 10 - Price Only", "2025-03-31");
   const earlyRun = await runFor("Early Superstars", "2025-12-31");
   await runCurrentStrategyVersion({
     client: prisma,
@@ -32,10 +32,10 @@ async function main() {
   const earlySelected = await selectedSnapshots(earlyRun.id);
   const earlyMarchSelected = await selectedSnapshots(earlyMarchRun.id);
 
-  await buyFromSnapshot(momentum.id, momentumSelected[0], "2025-03-31", "10", "first Momentum 10 buy");
-  await buyFromSnapshot(momentum.id, momentumSelected[0], "2025-04-07", "5", "second Momentum 10 buy, weighted-average demo");
-  await buyFromSnapshot(momentum.id, momentumSelected[1], "2025-03-31", "8", "Momentum 10 selected candidate");
-  await buyFromSnapshot(momentum.id, momentumSelected[2], "2025-03-31", "6", "Momentum 10 selected candidate");
+  await buyFromSnapshot(momentum.id, momentumSelected[0], "2025-03-31", "10", "first Momentum 10 Price Only buy");
+  await buyFromSnapshot(momentum.id, momentumSelected[0], "2025-04-07", "5", "second Momentum 10 Price Only buy, weighted-average demo");
+  await buyFromSnapshot(momentum.id, momentumSelected[1], "2025-03-31", "8", "Momentum 10 Price Only selected candidate");
+  await buyFromSnapshot(momentum.id, momentumSelected[2], "2025-03-31", "6", "Momentum 10 Price Only selected candidate");
   await sellManual(momentum.id, momentumSelected[0], "2025-06-30", "4", "partial manual sell");
 
   await buyFromSnapshot(early.id, earlySelected[0], "2025-12-31", "10", "Early Superstars selected candidate");

@@ -200,7 +200,7 @@ export function simulateCounterfactual(input: CounterfactualSimulationInput): Co
     const openEpisodes = [...episodes.values()].filter((episode) => episode.status === "OPEN");
     if (openEpisodes.length === 0) continue;
     const snapshot = marketSnapshotAsOf(input.marketData, effectiveConfig, reviewDate);
-    const comparison = input.strategyName === "Momentum 10"
+    const comparison = isMomentum10Strategy(input.strategyName)
       ? evaluateStrategy(momentumHoldingConfig(effectiveConfig), reviewDate, snapshot)
       : evaluateStrategy(earlyStructuralHoldingConfig(effectiveConfig), reviewDate, snapshot);
     const ranked = rankByCompany(comparison.candidates);
@@ -345,7 +345,7 @@ function exactPurchaseDateRank(snapshot: StrategyMarketSnapshot, episode: Simula
 }
 
 function thresholdFor(strategyName: string, episode: SimulatedEpisode, reviewDate: Date, config: EffectiveCounterfactualConfig) {
-  if (strategyName === "Momentum 10") return config.momentum.holdingRankThreshold;
+  if (isMomentum10Strategy(strategyName)) return config.momentum.holdingRankThreshold;
   return daysBetween(episode.openedAt, reviewDate) <= config.earlySuperstars.phase1DurationDays
     ? config.earlySuperstars.phase1RankThreshold
     : config.earlySuperstars.phase2RankThreshold;
@@ -353,13 +353,17 @@ function thresholdFor(strategyName: string, episode: SimulatedEpisode, reviewDat
 
 function reviewDates(strategyName: string, tradingDates: readonly Date[], entryDate: Date, endDate: Date, config: EffectiveCounterfactualConfig) {
   const result: Date[] = [];
-  const interval = strategyName === "Momentum 10" ? config.momentum.reviewIntervalDays : config.earlySuperstars.reviewIntervalDays;
-  const firstOffset = strategyName === "Momentum 10" ? config.momentum.gracePeriodDays : interval;
+  const interval = isMomentum10Strategy(strategyName) ? config.momentum.reviewIntervalDays : config.earlySuperstars.reviewIntervalDays;
+  const firstOffset = isMomentum10Strategy(strategyName) ? config.momentum.gracePeriodDays : interval;
   for (let target = addDays(entryDate, firstOffset); target <= endDate; target = addDays(target, interval)) {
     const tradingDate = firstTradingDateOnOrAfter(tradingDates, target);
     if (tradingDate && tradingDate <= endDate && !result.some((date) => sameDay(date, tradingDate))) result.push(tradingDate);
   }
   return result;
+}
+
+function isMomentum10Strategy(name: string) {
+  return name === "Momentum 10 - Price Only" || name === "Momentum 10";
 }
 
 function equityFromTrades(initialCapital: Prisma.Decimal | string | number, trades: readonly SimulatedTrade[], prices: readonly CounterfactualPricePoint[], startDate: Date, endDate: Date) {

@@ -45,7 +45,7 @@ export async function runPortfolioReview(input: {
   if (existing) return existing;
 
   const valuation = await valuePortfolioAsOf(input.client, portfolio.id, input.reviewDate);
-  const config = portfolio.strategy.name === "Momentum 10"
+  const config = isMomentum10Strategy(portfolio.strategy.name)
     ? momentum10HoldingConfig()
     : portfolio.strategy.name === "Early Superstars" && input.reviewType === "SCHEDULED"
       ? earlySuperstarsPhase1HoldingConfig()
@@ -119,9 +119,13 @@ export async function getReviewScheduleForPosition(input: {
   readonly firstPurchaseDate: Date;
   readonly asOfDate: Date;
 }) {
-  return input.strategyName === "Momentum 10"
+  return isMomentum10Strategy(input.strategyName)
     ? momentum10Schedule(input.firstPurchaseDate, input.asOfDate)
     : earlySuperstarsSchedule(input.firstPurchaseDate, input.asOfDate);
+}
+
+function isMomentum10Strategy(name: string) {
+  return name === "Momentum 10 - Price Only" || name === "Momentum 10";
 }
 
 function numberOrNull(value: number | null, decimals: number) {

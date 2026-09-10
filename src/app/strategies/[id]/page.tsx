@@ -9,7 +9,8 @@ import {
 } from "@/app/strategies/actions";
 import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
 import { prisma } from "@/lib/db/prisma";
-import { parseStrategyConfig } from "@/lib/strategies/config";
+import { strategyConfigForDisplay } from "@/lib/strategies/config";
+import { entryMomentumLabelForEarlySuperstarsVariant, isAutomatedHistoricalStrategy, isEarlySuperstarsHistoricalStrategy, isMomentum10HistoricalStrategy } from "@/lib/strategies/historical-run-service";
 import { listStrategyLiveHoldings } from "@/lib/strategies/live-holdings";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/ui/format";
 
@@ -17,10 +18,14 @@ export const dynamic = "force-dynamic";
 
 type StrategyDetailPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ startDate?: string; endDate?: string }>;
 };
 
-export default async function StrategyDetailPage({ params }: StrategyDetailPageProps) {
+export default async function StrategyDetailPage({ params, searchParams }: StrategyDetailPageProps) {
   const { id } = await params;
+  const query = await searchParams;
+  const historicalStartDate = dateParamOrDefault(query.startDate, "2026-01-02");
+  const historicalEndDate = dateParamOrDefault(query.endDate, "2026-09-07");
   const strategy = await prisma.strategy.findUnique({
     where: { id },
     include: {
@@ -34,9 +39,17 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
 
   const currentVersion = strategy.versions[0];
   const runStrategy = runStrategyAction.bind(null, strategy.id);
-  const runEarlySuperstarsHistorical = runEarlySuperstarsHistoricalAction.bind(null, strategy.id);
+  const runHistoricalStrategy = runEarlySuperstarsHistoricalAction.bind(null, strategy.id);
   const cloneStrategyVersion = cloneStrategyVersionAction.bind(null, strategy.id);
-  const config = currentVersion ? parseStrategyConfig(currentVersion.config) : null;
+  const config = currentVersion ? strategyConfigForDisplay(strategy.name, currentVersion.config) : null;
+  const strategyDisplayName = isEarlySuperstarsHistoricalStrategy(strategy.name) && config
+    ? `Early Superstars - ${entryMomentumLabelForEarlySuperstarsVariant(strategy.name, config)} Entry`
+    : strategy.name;
+  const entryMomentumLabel = isEarlySuperstarsHistoricalStrategy(strategy.name) && config
+    ? entryMomentumLabelForEarlySuperstarsVariant(strategy.name, config)
+    : isMomentum10HistoricalStrategy(strategy.name)
+      ? "1M"
+    : null;
   const [currentHoldings, unassignedOpenEpisodes] = await Promise.all([
     currentVersion
       ? listStrategyLiveHoldings({
@@ -65,9 +78,9 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
       <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div>
           <p className="text-sm font-medium text-[var(--accent)]">
-            {strategy.name === "Early Superstars" ? "REAL MARKET DATA" : "SYNTHETIC MARKET DATA"}
+            {isAutomatedHistoricalStrategy(strategy.name) ? "REAL MARKET DATA" : "SYNTHETIC MARKET DATA"}
           </p>
-          <h1 className="mt-2 text-3xl font-semibold">{strategy.name}</h1>
+          <h1 className="mt-2 text-3xl font-semibold">{strategyDisplayName}</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--muted)]">{strategy.description}</p>
         </div>
 
@@ -80,14 +93,14 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
           </div>
 
           <div className="space-y-4">
-            {strategy.name === "Early Superstars" ? (
-              <form action={runEarlySuperstarsHistorical} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
+            {isAutomatedHistoricalStrategy(strategy.name) ? (
+              <form action={runHistoricalStrategy} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
                 <div className="grid gap-3">
                   <label className="grid gap-2 text-sm font-medium">
                     Start Date
                     <input
                       className="h-11 rounded-md border border-[var(--border)] px-3"
-                      defaultValue="2026-01-02"
+                      defaultValue={historicalStartDate}
                       name="startDate"
                       type="date"
                     />
@@ -96,7 +109,7 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
                     End Date
                     <input
                       className="h-11 rounded-md border border-[var(--border)] px-3"
-                      defaultValue="2026-09-07"
+                      defaultValue={historicalEndDate}
                       name="endDate"
                       type="date"
                     />
@@ -104,32 +117,41 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
                 </div>
                 <ConfirmSubmitButton
                   className="mt-4 h-11 w-full rounded-md bg-[var(--accent)] text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                  confirmMessage="Run the automated Early Superstars historical simulation and store compact run results?"
+                  confirmMessage={`Run the automated ${strategyDisplayName} historical simulation and store compact run results?`}
                   pendingLabel="Running..."
                 >
                   Run Strategy
                 </ConfirmSubmitButton>
                 <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                  Uses UPSTOX_REAL close/volume history only. Historical market cap and D/E filters are unavailable and not applied.
+                  Uses UPSTOX_REAL close/volume history only.
                 </p>
               </form>
             ) : (
               <form action={runStrategy} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
-                <label className="grid gap-2 text-sm font-medium">
-                  Historical Run Date
+                  <label className="grid gap-2 text-sm font-medium">
+                  Start Date
                   <input
                     className="h-11 rounded-md border border-[var(--border)] px-3"
                     defaultValue="2025-12-31"
-                    name="runDate"
+                    name="startDate"
+                    type="date"
+                  />
+                </label>
+                <label className="mt-3 grid gap-2 text-sm font-medium">
+                  End Date
+                  <input
+                    className="h-11 rounded-md border border-[var(--border)] px-3"
+                    defaultValue="2026-09-07"
+                    name="endDate"
                     type="date"
                   />
                 </label>
                 <ConfirmSubmitButton
                   className="mt-4 h-11 w-full rounded-md bg-[var(--accent)] text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                  confirmMessage="Run the current strategy version and permanently store the historical candidate snapshots?"
+                  confirmMessage="Run the current strategy version at the start date and calculate returns through the end date?"
                   pendingLabel="Running..."
                 >
-                  Run Current Version
+                  Test Date Range
                 </ConfirmSubmitButton>
               </form>
             )}
@@ -145,14 +167,14 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
           </div>
         </div>
 
-        {strategy.name === "Early Superstars" ? (
+        {isAutomatedHistoricalStrategy(strategy.name) ? (
           <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
             <h2 className="text-lg font-semibold">Automated Historical Runs</h2>
             <div className="mt-4 max-w-full overflow-x-auto">
               <table className="w-full min-w-[900px] text-left text-sm">
                 <thead className="text-xs uppercase text-[var(--muted)]">
                   <tr>
-                    {["Requested", "Effective", "Version", "Return", "CAGR", "Trades", "Open At End", "Status"].map((head) => (
+                    {["Requested", "Effective", "Entry", "Version", "Return", "CAGR", "Trades", "Open At End", "Status"].map((head) => (
                       <th className="py-2 pr-3" key={head}>{head}</th>
                     ))}
                   </tr>
@@ -168,6 +190,7 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
                       <td className="py-3 pr-3">
                         {run.effectiveStartDate && run.effectiveEndDate ? `${formatDate(run.effectiveStartDate)} to ${formatDate(run.effectiveEndDate)}` : "-"}
                       </td>
+                      <td className="py-3 pr-3">{entryMomentumLabel ?? "-"}</td>
                       <td className="py-3 pr-3">V{run.strategyVersion.versionNumber}</td>
                       <td className="py-3 pr-3">{formatPercent(run.totalReturnPercent?.toNumber())}</td>
                       <td className="py-3 pr-3">{formatPercent(run.cagrPercent?.toNumber())}</td>
@@ -264,40 +287,46 @@ export default async function StrategyDetailPage({ params }: StrategyDetailPageP
           </div>
         ) : null}
 
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
-          <h2 className="text-lg font-semibold">Historical Runs</h2>
-          <div className="mt-4 max-w-full overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs uppercase text-[var(--muted)]">
-                <tr>
-                  <th className="py-2">Run Date</th>
-                  <th>Version</th>
-                  <th>Evaluated</th>
-                  <th>Eligible</th>
-                  <th>Selected</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {strategy.runs.map((run) => (
-                  <tr className="border-t border-[var(--border)]" key={run.id}>
-                    <td className="py-3">
-                      <Link className="font-medium text-[var(--accent)]" href={`/strategies/${strategy.id}/runs/${run.id}`}>
-                        {formatDate(run.runDate)}
-                      </Link>
-                    </td>
-                    <td>V{run.strategyVersion.versionNumber}</td>
-                    <td>{run.evaluatedCount}</td>
-                    <td>{run.eligibleCount}</td>
-                    <td>{run.selectedCount}</td>
-                    <td>{run.status}</td>
+        {!isAutomatedHistoricalStrategy(strategy.name) ? (
+          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
+            <h2 className="text-lg font-semibold">Historical Runs</h2>
+            <div className="mt-4 max-w-full overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="text-xs uppercase text-[var(--muted)]">
+                  <tr>
+                    <th className="py-2">Run Date</th>
+                    <th>Version</th>
+                    <th>Evaluated</th>
+                    <th>Eligible</th>
+                    <th>Selected</th>
+                    <th>Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {strategy.runs.map((run) => (
+                    <tr className="border-t border-[var(--border)]" key={run.id}>
+                      <td className="py-3">
+                        <Link className="font-medium text-[var(--accent)]" href={`/strategies/${strategy.id}/runs/${run.id}`}>
+                          {formatDate(run.runDate)}
+                        </Link>
+                      </td>
+                      <td>V{run.strategyVersion.versionNumber}</td>
+                      <td>{run.evaluatedCount}</td>
+                      <td>{run.eligibleCount}</td>
+                      <td>{run.selectedCount}</td>
+                      <td>{run.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
     </section>
   );
+}
+
+function dateParamOrDefault(value: string | undefined, fallback: string) {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : fallback;
 }
