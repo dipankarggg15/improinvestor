@@ -41,6 +41,10 @@ export async function createSupabaseServerClient() {
 
 export async function getOwnerSession() {
   const config = getAuthConfig();
+  if (config.localAuthBypass) {
+    return { user: { email: config.ownerEmail || "local-dev@improinvestor.local" } };
+  }
+
   if (!config.supabaseUrl || !config.supabasePublishableKey || !config.ownerEmail) {
     return null;
   }

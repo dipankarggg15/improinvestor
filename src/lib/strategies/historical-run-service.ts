@@ -3,7 +3,9 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   earlySuperstarsHistoricalRules,
   momentum10HistoricalRules,
+  nseMomentumHistoricalRules,
   simulateMomentum10Historical,
+  simulateNseMomentumHistorical,
   simulateEarlySuperstarsHistorical,
   type EarlySuperstarsRules,
   type HistoricalRunnerCandidate,
@@ -66,13 +68,20 @@ export async function completeEarlySuperstarsHistoricalRun(input: {
   if (run.status === "COMPLETED") return run;
 
   try {
-    const candidates = await loadRealCanonicalCandidates(input.client);
+    const isNseMomentum = isNseMomentumHistoricalStrategy(run.strategy.name);
+    const candidates = isNseMomentum
+      ? await loadRealNseCandidates(input.client)
+      : await loadRealCanonicalCandidates(input.client);
     const rules = isMomentum10HistoricalStrategy(run.strategy.name)
       ? null
+      : isNseMomentum
+        ? null
       : rulesForEarlySuperstarsVariant(run.strategy.name, run.strategyVersion.config);
     const earliestLoadDate = rules
       ? addUtcDays(addUtcMonths(run.requestedStartDate, -3), -rules.entryMomentumDays)
-      : addUtcMonths(run.requestedStartDate, -3);
+      : isNseMomentum
+        ? addUtcMonths(run.requestedStartDate, -13)
+        : addUtcMonths(run.requestedStartDate, -3);
     const prices = await loadRealPrices(
       input.client,
       earliestLoadDate,
@@ -80,7 +89,14 @@ export async function completeEarlySuperstarsHistoricalRun(input: {
       candidates.map((candidate) => candidate.instrumentId),
     );
 
-    const result = isMomentum10HistoricalStrategy(run.strategy.name)
+    const result = isNseMomentum
+      ? simulateNseMomentumHistorical({
+          requestedStartDate: run.requestedStartDate,
+          requestedEndDate: run.requestedEndDate,
+          candidates,
+          prices,
+        })
+      : isMomentum10HistoricalStrategy(run.strategy.name)
       ? simulateMomentum10Historical({
           requestedStartDate: run.requestedStartDate,
           requestedEndDate: run.requestedEndDate,
@@ -120,7 +136,7 @@ async function loadRunnableHistoricalStrategy(client: PrismaClient, strategyId: 
 
   if (!strategy) throw new Error("Strategy not found.");
   if (!isAutomatedHistoricalStrategy(strategy.name)) {
-    throw new Error("Automated historical runs are currently available only for Early Superstars and Momentum 10.");
+    throw new Error("Automated historical runs are currently available only for Early Superstars, Momentum 10, and NSE Momentum.");
   }
 
   const version = strategy.versions[0];
@@ -137,13 +153,19 @@ export function isMomentum10HistoricalStrategy(name: string) {
   return name === "Momentum 10 - Price Only";
 }
 
+export function isNseMomentumHistoricalStrategy(name: string) {
+  return name === "NSE Momentum";
+}
+
 export function isAutomatedHistoricalStrategy(name: string) {
-  return isEarlySuperstarsHistoricalStrategy(name) || isMomentum10HistoricalStrategy(name);
+  return isEarlySuperstarsHistoricalStrategy(name) || isMomentum10HistoricalStrategy(name) || isNseMomentumHistoricalStrategy(name);
 }
 
 function initialCapitalForStrategy(name: string) {
   return isMomentum10HistoricalStrategy(name)
     ? momentum10HistoricalRules.initialCapital
+    : isNseMomentumHistoricalStrategy(name)
+      ? nseMomentumHistoricalRules.initialCapital
     : earlySuperstarsHistoricalRules.initialCapital;
 }
 
@@ -297,6 +319,38 @@ async function loadRealCanonicalCandidates(client: PrismaClient): Promise<Histor
         : null;
     })
     .filter((candidate): candidate is HistoricalRunnerCandidate => candidate !== null);
+}
+
+async function loadRealNseCandidates(client: PrismaClient): Promise<HistoricalRunnerCandidate[]> {
+  const companies = await client.company.findMany({
+    where: { marketDataSource: realSource },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      isin: true,
+      instruments: {
+        where: { active: true, marketDataSource: realSource, exchange: "NSE" },
+        select: { id: true, exchange: true, symbol: true },
+      },
+    },
+  });
+
+  return companies
+    .flatMap((company) => {
+      const instrument = company.instruments[0];
+      return instrument
+        ? [{
+            companyId: company.id,
+            companyName: company.name,
+            isin: company.isin,
+            instrumentId: instrument.id,
+            symbol: instrument.symbol,
+            exchange: "NSE",
+            marketDataSource: realSource,
+          } satisfies HistoricalRunnerCandidate]
+        : [];
+    });
 }
 
 async function loadRealPrices(

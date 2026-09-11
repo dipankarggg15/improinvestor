@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 const navigationItems = [
   { label: "Dashboard", href: "/" },
   { label: "Strategies", href: "/strategies" },
+  { label: "Finding Momentum", href: "/finding-momentum" },
   { label: "Portfolio", href: "/portfolio" },
   { label: "Trades", href: "/trades" },
   { label: "Screener", href: "/screener" },

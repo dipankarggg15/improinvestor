@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { PrismaClient, type Prisma } from "@prisma/client";
 
-import { earlySuperstars1WEntryConfig, earlySuperstars2WEntryConfig, momentum10V1Config } from "../src/lib/strategies/config";
+import { earlySuperstars1WEntryConfig, earlySuperstars2WEntryConfig, momentum10V1Config, nseMomentumV1Config } from "../src/lib/strategies/config";
 import { assertStrategyVersionConfigEditable } from "../src/lib/strategies/versioning";
 
 const prisma = new PrismaClient();
@@ -16,6 +16,14 @@ async function main() {
     config: momentum10V1Config,
     label: "V1 Price Only",
     notes: "Momentum 10 V1 price-only strategy without fundamentals filters.",
+  });
+  await seedStrategy({
+    name: "NSE Momentum",
+    description:
+      "Ranks NSE stocks by volatility-adjusted 1-month and 3-month momentum z-scores, buys the Top 20, and keeps monthly holdings that remain inside the Top 50.",
+    config: nseMomentumV1Config,
+    label: "V1 NSE Momentum",
+    notes: "NSE Momentum V1 using price-only volatility-adjusted 1M/3M cross-sectional z-score ranking.",
   });
   await seedStrategy({
     name: "Early Superstars",

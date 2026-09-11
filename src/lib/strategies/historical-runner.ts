@@ -42,6 +42,13 @@ export type Momentum10HistoricalRules = {
   readonly holdingRankThreshold: number;
 };
 
+export type NseMomentumHistoricalRules = {
+  readonly maxPositions: number;
+  readonly initialCapital: number;
+  readonly holdingRankThreshold: number;
+  readonly minVolatilityReturnCount: number;
+};
+
 export type EarlySuperstarsMetric = {
   readonly entryMomentumReturn: number;
   readonly return1M: number;
@@ -180,6 +187,20 @@ type Momentum10ReviewCandidate = Momentum10EntryCandidate & {
   readonly validUniverseCount: number;
 };
 
+export type NseMomentumRankedCandidate = HistoricalRunnerCandidate & {
+  readonly rank: number;
+  readonly return1M: number;
+  readonly return3M: number;
+  readonly annualizedVolatility: number;
+  readonly adjusted1M: number;
+  readonly adjusted3M: number;
+  readonly z1M: number;
+  readonly z3M: number;
+  readonly momentumScore: number;
+  readonly validUniverseCount: number;
+  readonly sourceDates: Record<string, { requestedStartDate: string; actualStartDate: string; actualEndDate: string }>;
+};
+
 type SinceEntryRankedCandidate = HistoricalRunnerCandidate & {
   readonly rank: number;
   readonly sinceEntryReturn: number;
@@ -210,6 +231,13 @@ export const momentum10HistoricalRules: Momentum10HistoricalRules = {
   initialHoldDays: 30,
   reviewIntervalDays: 14,
   holdingRankThreshold: 30,
+};
+
+export const nseMomentumHistoricalRules: NseMomentumHistoricalRules = {
+  maxPositions: 20,
+  initialCapital: 1_000_000,
+  holdingRankThreshold: 50,
+  minVolatilityReturnCount: 200,
 };
 
 export function simulateMomentum10Historical(input: {
@@ -414,6 +442,253 @@ export function simulateMomentum10Historical(input: {
   };
 }
 
+export function simulateNseMomentumHistorical(input: {
+  readonly requestedStartDate: Date;
+  readonly requestedEndDate: Date;
+  readonly candidates: readonly HistoricalRunnerCandidate[];
+  readonly prices: readonly HistoricalRunnerPrice[];
+  readonly rules?: Partial<NseMomentumHistoricalRules>;
+}): HistoricalStrategyRunResult {
+  if (input.requestedEndDate <= input.requestedStartDate) {
+    throw new Error("End Date must be after Start Date.");
+  }
+  if (input.prices.some((price) => price.marketDataSource !== "UPSTOX_REAL")) {
+    throw new Error("Historical NSE Momentum runs require UPSTOX_REAL prices only.");
+  }
+  if (input.candidates.some((candidate) => candidate.marketDataSource !== "UPSTOX_REAL" || candidate.exchange !== "NSE")) {
+    throw new Error("Historical NSE Momentum runs require NSE UPSTOX_REAL candidates only.");
+  }
+
+  const rules = { ...nseMomentumHistoricalRules, ...input.rules };
+  const pricesByInstrument = groupPrices(input.prices);
+  const allTradingDates = tradingDates(input.prices);
+  const requestedStartKey = toDateKey(input.requestedStartDate);
+  const requestedEndKey = toDateKey(input.requestedEndDate);
+  const effectiveEnd = lastDateOnOrBefore(allTradingDates, requestedEndKey);
+  const effectiveStart = firstDateWithNseMomentumLookback(allTradingDates, requestedStartKey, effectiveEnd);
+
+  if (!effectiveStart || !effectiveEnd || effectiveStart > effectiveEnd) {
+    throw new Error("No available UPSTOX_REAL NSE trading dates with 1-year lookback exist in the requested range.");
+  }
+
+  const simulationDates = allTradingDates.filter((date) => date >= effectiveStart && date <= effectiveEnd);
+  const events: HistoricalEventResult[] = [];
+  const positions: MutablePosition[] = [];
+  const rankCache = new Map<string, NseMomentumRankedCandidate[]>();
+  let cash = rules.initialCapital;
+  let tradeCount = 0;
+  let initialPositionCount = 0;
+  let peakEquity = rules.initialCapital;
+  const dailyEquity: HistoricalDailyEquityResult[] = [];
+
+  const initialRanking = rankNseMomentum(input.candidates, pricesByInstrument, dateFromKey(effectiveStart), rules, rankCache);
+  const initialSelection = initialRanking.slice(0, rules.maxPositions);
+  events.push(event("INITIAL_SELECTION", effectiveStart, null, null, null, {
+    selectedCount: initialSelection.length,
+    eligibleCount: initialRanking.length,
+    ranking: "momentumScore desc",
+    universe: "NSE only",
+    filters: ["sufficient 1M, 3M, and 1Y daily return history", "annualized volatility > 0"],
+  }));
+
+  for (const candidate of initialSelection) {
+    const position = buyNseMomentumCandidate({
+      candidate,
+      buyDate: effectiveStart,
+      pricesByInstrument,
+      allocation: rules.initialCapital / rules.maxPositions,
+      nextReviewTargetDate: toDateKey(addUtcMonths(dateFromKey(effectiveStart), 1)),
+      source: "INITIAL_SELECTION",
+      events,
+    });
+    if (!position) continue;
+    cash -= position.allocation;
+    tradeCount += 1;
+    initialPositionCount += 1;
+    positions.push(position);
+  }
+
+  const reviewTargets = monthlyReviewTargets(effectiveStart, effectiveEnd);
+  const reviewDates = new Map(reviewTargets.map((target) => [firstDateOnOrAfter(simulationDates, target), target]).filter((entry): entry is [string, string] => entry[0] !== null));
+
+  for (const dateKey of simulationDates) {
+    const scheduledTargetDate = reviewDates.get(dateKey);
+    if (scheduledTargetDate) {
+      const ranked = rankNseMomentum(input.candidates, pricesByInstrument, dateFromKey(dateKey), rules, rankCache);
+      const rankedByCompany = new Map(ranked.map((candidate) => [candidate.companyId, candidate]));
+      let exitProceeds = 0;
+      const exitedCompanyIds = new Set<string>();
+
+      for (const position of positions.filter((item) => item.status === "OPEN")) {
+        const rankedHolding = rankedByCompany.get(position.companyId) ?? null;
+        const decision = rankedHolding && rankedHolding.rank <= rules.holdingRankThreshold ? "KEEP" : "RANK_FAILURE";
+        const review: HistoricalPositionReview = {
+          reviewDate: dateKey,
+          scheduledTargetDate,
+          entryDate: position.entryDate,
+          windowCalendarDays: daysBetween(position.entryDate, dateKey),
+          rank: rankedHolding?.rank ?? null,
+          sinceEntryReturn: rankedHolding ? round(rankedHolding.momentumScore) : null,
+          comparisonDate: rankedHolding?.sourceDates.return1M?.actualEndDate ?? null,
+          validUniverseCount: ranked.length,
+          threshold: rules.holdingRankThreshold,
+          decision,
+          reason: decision === "KEEP"
+            ? null
+            : rankedHolding
+              ? "Momentum rank is outside the Top 50."
+              : "Holding does not have sufficient price data for NSE Momentum ranking.",
+        };
+        position.reviewHistory.push(review);
+        events.push(event("MONTHLY_REVIEW", dateKey, position.clientId, position.companyId, position.instrumentId, {
+          ...review,
+          return1M: rankedHolding ? round(rankedHolding.return1M) : null,
+          return3M: rankedHolding ? round(rankedHolding.return3M) : null,
+          annualizedVolatility: rankedHolding ? round(rankedHolding.annualizedVolatility) : null,
+          adjusted1M: rankedHolding ? round(rankedHolding.adjusted1M) : null,
+          adjusted3M: rankedHolding ? round(rankedHolding.adjusted3M) : null,
+          z1M: rankedHolding ? round(rankedHolding.z1M) : null,
+          z3M: rankedHolding ? round(rankedHolding.z3M) : null,
+          momentumScore: rankedHolding ? round(rankedHolding.momentumScore) : null,
+          ranking: "momentumScore desc",
+        }));
+
+        if (decision === "KEEP") {
+          position.nextReviewTargetDate = toDateKey(addUtcMonths(dateFromKey(position.nextReviewTargetDate), 1));
+          events.push(event("RANK_KEEP", dateKey, position.clientId, position.companyId, position.instrumentId, {
+            rank: rankedHolding?.rank ?? null,
+            momentumScore: rankedHolding ? round(rankedHolding.momentumScore) : null,
+            threshold: rules.holdingRankThreshold,
+            nextReviewTargetDate: position.nextReviewTargetDate,
+          }));
+          continue;
+        }
+
+        const price = priceOn(pricesByInstrument.get(position.instrumentId) ?? [], dateKey);
+        if (!price) continue;
+        closePosition({
+          position,
+          dateKey,
+          price: price.close,
+          reason: "MONTHLY_RANK_FAILURE",
+          events,
+        });
+        cash += position.quantity * price.close;
+        exitProceeds += position.quantity * price.close;
+        tradeCount += 1;
+        exitedCompanyIds.add(position.companyId);
+      }
+
+      const heldCompanyIds = new Set(positions.filter((position) => position.status === "OPEN").map((position) => position.companyId));
+      const vacancies = Math.max(rules.maxPositions - heldCompanyIds.size, 0);
+      events.push(event("REPLACEMENT_SCREEN", dateKey, null, null, null, {
+        vacancies,
+        availableProceeds: round(exitProceeds),
+        heldCount: heldCompanyIds.size,
+        ranking: "momentumScore desc",
+      }));
+      const replacements = ranked
+        .filter((candidate) => !heldCompanyIds.has(candidate.companyId) && !exitedCompanyIds.has(candidate.companyId))
+        .slice(0, vacancies);
+      const replacementAllocation = replacements.length > 0 ? exitProceeds / replacements.length : 0;
+
+      for (const candidate of replacements) {
+        events.push(event("REPLACEMENT_SELECTED", dateKey, null, candidate.companyId, candidate.instrumentId, {
+          symbol: candidate.symbol,
+          rank: candidate.rank,
+          momentumScore: round(candidate.momentumScore),
+          z1M: round(candidate.z1M),
+          z3M: round(candidate.z3M),
+          allocation: round(replacementAllocation),
+          scheduledBuyDate: dateKey,
+        }));
+        const position = buyNseMomentumCandidate({
+          candidate,
+          buyDate: dateKey,
+          pricesByInstrument,
+          allocation: replacementAllocation,
+          nextReviewTargetDate: toDateKey(addUtcMonths(dateFromKey(scheduledTargetDate), 1)),
+          source: "REPLACEMENT_SELECTED",
+          events,
+        });
+        if (!position) continue;
+        cash -= position.allocation;
+        tradeCount += 1;
+        heldCompanyIds.add(candidate.companyId);
+        positions.push(position);
+      }
+    }
+
+    const equity = equityForDay(dateKey, cash, positions, pricesByInstrument, rules.initialCapital, peakEquity);
+    peakEquity = Math.max(peakEquity, equity.totalEquity);
+    dailyEquity.push({ ...equity, drawdownPercent: peakEquity === 0 ? 0 : returnPercent(peakEquity, equity.totalEquity) });
+  }
+
+  for (const position of positions.filter((item) => item.status !== "CLOSED")) {
+    const lastPrice = priceOnOrBefore(pricesByInstrument.get(position.instrumentId) ?? [], effectiveEnd);
+    events.push(event("OPEN_AT_END", effectiveEnd, position.clientId, position.companyId, position.instrumentId, {
+      latestPrice: lastPrice?.close ?? null,
+      unrealizedReturnPercent: lastPrice ? round(returnPercent(position.entryPrice, lastPrice.close)) : null,
+    }));
+  }
+
+  const endingValue = dailyEquity.at(-1)?.totalEquity ?? rules.initialCapital;
+  const totalReturn = returnPercent(rules.initialCapital, endingValue);
+  const years = daysBetween(effectiveStart, effectiveEnd) / 365.25;
+
+  return {
+    requestedStartDate: requestedStartKey,
+    requestedEndDate: requestedEndKey,
+    effectiveStartDate: effectiveStart,
+    effectiveEndDate: effectiveEnd,
+    initialCapital: rules.initialCapital,
+    endingValue: round(endingValue),
+    totalReturnPercent: round(totalReturn),
+    cagrPercent: years > 0 && endingValue > 0 ? round(((endingValue / rules.initialCapital) ** (1 / years) - 1) * 100) : null,
+    maxDrawdownPercent: round(Math.min(0, ...dailyEquity.map((point) => point.drawdownPercent))),
+    initialPositionCount,
+    tradeCount,
+    stopLossExitCount: 0,
+    monthlyRankExitCount: positions.filter((position) => position.exitReason === "MONTHLY_RANK_FAILURE").length,
+    graduationCount: 0,
+    endingOpenPositionCount: positions.filter((position) => position.status !== "CLOSED").length,
+    unavailableFilters: [],
+    limitations: limitations(),
+    assumptions: [
+      "NSE Momentum uses only NSE-listed UPSTOX_REAL candidates and stored close prices.",
+      "No market-cap, fundamental, P/E, debt/equity, ATV/liquidity, or stop-loss filter is applied.",
+      `Volatility requires at least ${rules.minVolatilityReturnCount} daily close-to-close returns over the previous 1 calendar year and is annualized with sqrt(252).`,
+      "1M and 3M returns are divided by annualized volatility, converted to separate cross-sectional z-scores on each review date, then averaged into Momentum Score.",
+      "Initial entries buy Top 20 equally; monthly reviews keep Top 50 holdings and split only exit proceeds across replacements without rebalancing retained holdings.",
+    ],
+    positions: positions.map(finalizePosition),
+    events,
+    dailyEquity,
+  };
+}
+
+export function rankNseMomentumForDate(input: {
+  readonly rankingDate: Date;
+  readonly candidates: readonly HistoricalRunnerCandidate[];
+  readonly prices: readonly HistoricalRunnerPrice[];
+  readonly rules?: Partial<NseMomentumHistoricalRules>;
+}) {
+  if (input.prices.some((price) => price.marketDataSource !== "UPSTOX_REAL")) {
+    throw new Error("NSE Momentum ranking requires UPSTOX_REAL prices only.");
+  }
+  if (input.candidates.some((candidate) => candidate.marketDataSource !== "UPSTOX_REAL" || candidate.exchange !== "NSE")) {
+    throw new Error("NSE Momentum ranking requires NSE UPSTOX_REAL candidates only.");
+  }
+
+  return rankNseMomentum(
+    input.candidates,
+    groupPrices(input.prices),
+    input.rankingDate,
+    { ...nseMomentumHistoricalRules, ...input.rules },
+    new Map(),
+  );
+}
+
 function closePosition(input: {
   readonly position: MutablePosition;
   readonly dateKey: string;
@@ -440,6 +715,168 @@ function closePosition(input: {
     exitPrice: round(input.price),
     realizedReturnPercent: round(input.position.realizedReturnPercent),
   }));
+}
+
+function buyNseMomentumCandidate(input: {
+  readonly candidate: NseMomentumRankedCandidate;
+  readonly buyDate: string;
+  readonly pricesByInstrument: ReadonlyMap<string, readonly HistoricalRunnerPrice[]>;
+  readonly allocation: number;
+  readonly nextReviewTargetDate: string;
+  readonly source: string;
+  readonly events: HistoricalEventResult[];
+}): MutablePosition | null {
+  const price = priceOn(input.pricesByInstrument.get(input.candidate.instrumentId) ?? [], input.buyDate);
+  if (!price || price.close <= 0 || input.allocation <= 0) return null;
+  const quantity = input.allocation / price.close;
+  const clientId = `nse-momentum-${input.candidate.companyId}-${input.buyDate}-${input.events.length}`;
+  const position: MutablePosition = {
+    clientId,
+    companyId: input.candidate.companyId,
+    companyName: input.candidate.companyName,
+    isin: input.candidate.isin,
+    instrumentId: input.candidate.instrumentId,
+    symbol: input.candidate.symbol,
+    exchange: input.candidate.exchange,
+    status: "OPEN",
+    entryDate: input.buyDate,
+    entryPrice: price.close,
+    quantity,
+    allocation: input.allocation,
+    entryRank: input.candidate.rank,
+    entryReturn1W: input.candidate.momentumScore,
+    stopTriggerDate: null,
+    stopTriggerPrice: null,
+    exitDate: null,
+    exitPrice: null,
+    exitReason: null,
+    realizedReturnPercent: null,
+    scheduledSaleDate: null,
+    scheduledSaleReason: null,
+    nextReviewTargetDate: input.nextReviewTargetDate,
+    graduated: false,
+    reviewHistory: [],
+  };
+  input.events.push(event("BUY", input.buyDate, clientId, input.candidate.companyId, input.candidate.instrumentId, {
+    source: input.source,
+    price: round(price.close),
+    quantity: round(quantity),
+    allocation: round(input.allocation),
+    entryRank: input.candidate.rank,
+    momentumScore: round(input.candidate.momentumScore),
+    return1M: round(input.candidate.return1M),
+    return3M: round(input.candidate.return3M),
+    annualizedVolatility: round(input.candidate.annualizedVolatility),
+    adjusted1M: round(input.candidate.adjusted1M),
+    adjusted3M: round(input.candidate.adjusted3M),
+    z1M: round(input.candidate.z1M),
+    z3M: round(input.candidate.z3M),
+    nextReviewTargetDate: input.nextReviewTargetDate,
+    sourceDates: input.candidate.sourceDates,
+  }));
+  return position;
+}
+
+function rankNseMomentum(
+  candidates: readonly HistoricalRunnerCandidate[],
+  pricesByInstrument: ReadonlyMap<string, readonly HistoricalRunnerPrice[]>,
+  asOfDate: Date,
+  rules: NseMomentumHistoricalRules,
+  cache: Map<string, NseMomentumRankedCandidate[]>,
+) {
+  const cacheKey = toDateKey(asOfDate);
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const metrics = candidates.flatMap((candidate) => {
+    if (candidate.exchange !== "NSE") return [];
+    const prices = pricesByInstrument.get(candidate.instrumentId) ?? [];
+    const oneMonth = calculateReturn(prices, addUtcMonths(asOfDate, -1), asOfDate);
+    const threeMonth = calculateReturn(prices, addUtcMonths(asOfDate, -3), asOfDate);
+    const annualizedVolatility = calculateAnnualizedVolatility(prices, addUtcMonths(asOfDate, -12), asOfDate, rules.minVolatilityReturnCount);
+    if (!oneMonth || !threeMonth || annualizedVolatility === null || annualizedVolatility <= 0) return [];
+    return [{
+      ...candidate,
+      return1M: oneMonth.returnPercent,
+      return3M: threeMonth.returnPercent,
+      annualizedVolatility,
+      adjusted1M: oneMonth.returnPercent / annualizedVolatility,
+      adjusted3M: threeMonth.returnPercent / annualizedVolatility,
+      sourceDates: {
+        return1M: sourceDates(oneMonth),
+        return3M: sourceDates(threeMonth),
+      },
+    }];
+  });
+
+  const oneMonthStats = meanAndStdDev(metrics.map((metric) => metric.adjusted1M));
+  const threeMonthStats = meanAndStdDev(metrics.map((metric) => metric.adjusted3M));
+  if (!oneMonthStats || !threeMonthStats || oneMonthStats.stdDev === 0 || threeMonthStats.stdDev === 0) {
+    cache.set(cacheKey, []);
+    return [];
+  }
+
+  const ranked = metrics
+    .map((metric) => {
+      const z1M = (metric.adjusted1M - oneMonthStats.mean) / oneMonthStats.stdDev;
+      const z3M = (metric.adjusted3M - threeMonthStats.mean) / threeMonthStats.stdDev;
+      return {
+        ...metric,
+        rank: 0,
+        z1M,
+        z3M,
+        momentumScore: (z1M + z3M) / 2,
+        validUniverseCount: metrics.length,
+      };
+    })
+    .sort((left, right) => {
+      const score = right.momentumScore - left.momentumScore;
+      if (score !== 0) return score;
+      return left.symbol.localeCompare(right.symbol);
+    })
+    .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+
+  cache.set(cacheKey, ranked);
+  return ranked;
+}
+
+function calculateAnnualizedVolatility(
+  prices: readonly HistoricalRunnerPrice[],
+  startDate: Date,
+  endDate: Date,
+  minReturnCount: number,
+) {
+  const period = prices.filter((price) => price.tradingDate >= startDate && price.tradingDate <= endDate && price.close > 0);
+  if (period.length < minReturnCount + 1) return null;
+  const returns: number[] = [];
+  for (let index = 1; index < period.length; index += 1) {
+    const previous = period[index - 1];
+    const current = period[index];
+    if (!previous || !current || previous.close <= 0) continue;
+    returns.push((current.close / previous.close) - 1);
+  }
+  if (returns.length < minReturnCount) return null;
+  const stats = meanAndStdDev(returns);
+  if (!stats || stats.stdDev <= 0 || !Number.isFinite(stats.stdDev)) return null;
+  return stats.stdDev * Math.sqrt(252);
+}
+
+function meanAndStdDev(values: readonly number[]) {
+  const finite = values.filter((value) => Number.isFinite(value));
+  if (finite.length === 0) return null;
+  const mean = finite.reduce((sum, value) => sum + value, 0) / finite.length;
+  const variance = finite.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / finite.length;
+  return { mean, stdDev: Math.sqrt(variance) };
+}
+
+function monthlyReviewTargets(effectiveStart: string, effectiveEnd: string) {
+  const targets: string[] = [];
+  let target = addUtcMonths(dateFromKey(effectiveStart), 1);
+  while (toDateKey(target) <= effectiveEnd) {
+    targets.push(toDateKey(target));
+    target = addUtcMonths(target, 1);
+  }
+  return targets;
 }
 
 function selectMomentum10Replacements(input: {
@@ -1120,6 +1557,18 @@ function firstDateWithRequiredLookback(dates: readonly string[], requestedStart:
     if (effectiveEnd && date > effectiveEnd) return null;
 
     const requiredLookbackDate = toDateKey(addUtcMonths(dateFromKey(date), -3));
+    if (lastDateOnOrBefore(dates, requiredLookbackDate)) return date;
+  }
+
+  return null;
+}
+
+function firstDateWithNseMomentumLookback(dates: readonly string[], requestedStart: string, effectiveEnd: string | null) {
+  for (const date of dates) {
+    if (date < requestedStart) continue;
+    if (effectiveEnd && date > effectiveEnd) return null;
+
+    const requiredLookbackDate = toDateKey(addUtcMonths(dateFromKey(date), -12));
     if (lastDateOnOrBefore(dates, requiredLookbackDate)) return date;
   }
 

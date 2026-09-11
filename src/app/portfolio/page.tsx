@@ -80,7 +80,7 @@ export default async function PortfolioPage() {
     <section className="px-4 py-5 sm:px-6 lg:px-10">
       <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div>
-          <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
+          <p className="text-sm font-medium text-[var(--accent)]">REAL MARKET DATA</p>
           <h1 className="mt-2 text-3xl font-semibold">Portfolio</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
             Overall actual investment performance across all strategy attributions.

@@ -7,6 +7,7 @@ export const rankingMetricKeys = [
   "marketCap",
   "debtToEquity",
   "averageTradedValue",
+  "momentumScore",
   ...returnMetricKeys,
 ] as const;
 export type RankingMetricKey = (typeof rankingMetricKeys)[number];
@@ -85,6 +86,20 @@ export const momentum10V1Config = strategyConfigSchema.parse({
   },
   selection: {
     maxPositions: 10,
+  },
+});
+
+export const nseMomentumV1Config = strategyConfigSchema.parse({
+  eligibility: {},
+  liquidity: {
+    lookback: { type: "calendarMonths", months: 12 },
+  },
+  ranking: {
+    metric: "momentumScore",
+    direction: "desc",
+  },
+  selection: {
+    maxPositions: 20,
   },
 });
 

@@ -197,15 +197,17 @@ function parseDailyCandle(instrumentKey: string, raw: unknown): ProviderDailyCan
   if (!tradingDate || !isFiniteNumber(open) || !isFiniteNumber(high) || !isFiniteNumber(low) || !isFiniteNumber(close)) {
     throw new Error("Upstox historical candle row contained invalid OHLC data.");
   }
+  const normalizedHigh = Math.max(open, high, low, close);
+  const normalizedLow = Math.min(open, high, low, close);
 
   return {
     instrumentKey,
     tradingDate,
     open: String(open),
-    high: String(high),
-    low: String(low),
+    high: String(normalizedHigh),
+    low: String(normalizedLow),
     close: String(close),
-    volume: BigInt(Math.trunc(Number(volume ?? 0))),
+    volume: BigInt(Math.max(0, Math.trunc(Number(volume ?? 0)))),
   };
 }
 
