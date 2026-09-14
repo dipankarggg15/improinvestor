@@ -60,7 +60,7 @@ export default async function TradesPage({ searchParams }: TradesPageProps) {
       <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
+            <p className="text-sm font-medium text-[var(--accent)]">REAL MARKET DATA</p>
             <h1 className="mt-2 text-3xl font-semibold">Trades</h1>
             <p className="mt-2 text-sm text-[var(--muted)]">
               Actual BUY and SELL transactions from the immutable trade ledger.

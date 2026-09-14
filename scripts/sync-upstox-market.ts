@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 
 import { createUpstoxMarketDataProviderCore } from "@/lib/market-data/providers/upstox-core";
 import { runUpstoxRealMarketSync, type UpstoxSyncMode } from "@/lib/market-data/upstox-sync";
+import type { ProviderExchange } from "@/lib/market-data/types";
 
 const prisma = new PrismaClient();
 
@@ -15,6 +16,9 @@ async function main() {
   const progressEvery = args.progressEvery ? Number(args.progressEvery) : 25;
   const years = args.years ? Number(args.years) : 1;
   const symbols = args.symbols?.split(",").map((symbol) => symbol.trim()).filter(Boolean);
+  const exchanges = readExchanges(args.exchange);
+  const startDate = args.startDate ? readDate(args.startDate, "startDate") : undefined;
+  const endDate = args.endDate ? readDate(args.endDate, "endDate") : undefined;
 
   if (args.full !== "true" && !limit && (!symbols || symbols.length === 0)) {
     throw new Error("Refusing unbounded Upstox sync. Pass --limit, --symbols, or --full=true.");
@@ -32,11 +36,15 @@ async function main() {
     progressEvery,
     limit,
     symbols,
+    exchanges,
+    startDate,
+    endDate,
   });
 
   console.log(JSON.stringify({
     source: "UPSTOX_REAL",
     mode,
+    exchanges,
     universeCounts: result.universeCounts,
     processed: result.processed,
     successful: result.successful,
@@ -56,6 +64,22 @@ function parseArgs(args: readonly string[]) {
     const [key, value = "true"] = arg.replace(/^--/, "").split("=");
     return [key, value];
   })) as Record<string, string>;
+}
+
+function readExchanges(input: string | undefined): ProviderExchange[] | undefined {
+  if (!input) return undefined;
+  return input.split(",").map((exchange) => {
+    const normalized = exchange.trim().toUpperCase();
+    if (normalized === "NSE" || normalized === "BSE") return normalized;
+    throw new Error("Exchange must be NSE, BSE, or a comma-separated list of both.");
+  });
+}
+
+function readDate(input: string, name: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+    throw new Error(`${name} must be in YYYY-MM-DD format.`);
+  }
+  return new Date(`${input}T00:00:00.000Z`);
 }
 
 function readMode(input: string | undefined): UpstoxSyncMode {

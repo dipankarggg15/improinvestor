@@ -10,7 +10,7 @@ import {
 import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
 import { prisma } from "@/lib/db/prisma";
 import { strategyConfigForDisplay } from "@/lib/strategies/config";
-import { entryMomentumLabelForEarlySuperstarsVariant, isAutomatedHistoricalStrategy, isEarlySuperstarsHistoricalStrategy, isMomentum10HistoricalStrategy } from "@/lib/strategies/historical-run-service";
+import { entryMomentumLabelForEarlySuperstarsVariant, isAutomatedHistoricalStrategy, isEarlySuperstarsHistoricalStrategy, isMomentum10HistoricalStrategy, isNseMomentumHistoricalStrategy } from "@/lib/strategies/historical-run-service";
 import { listStrategyLiveHoldings } from "@/lib/strategies/live-holdings";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/ui/format";
 
@@ -49,6 +49,8 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
     ? entryMomentumLabelForEarlySuperstarsVariant(strategy.name, config)
     : isMomentum10HistoricalStrategy(strategy.name)
       ? "1M"
+      : isNseMomentumHistoricalStrategy(strategy.name)
+        ? "Score"
     : null;
   const [currentHoldings, unassignedOpenEpisodes] = await Promise.all([
     currentVersion

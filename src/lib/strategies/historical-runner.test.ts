@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import { annotateReturnIfHeldToEndPercent } from "@/lib/strategies/historical-run-service";
 import {
   simulateMomentum10Historical,
+  simulateNseMomentumHistorical,
   simulateEarlySuperstarsHistorical,
   type EarlySuperstarsRules,
   type HistoricalRunnerCandidate,
   type HistoricalRunnerPrice,
   type Momentum10HistoricalRules,
+  type NseMomentumHistoricalRules,
 } from "@/lib/strategies/historical-runner";
 
 const realSource = "UPSTOX_REAL" as const;
@@ -88,6 +90,68 @@ describe("Momentum 10 price-only historical runner", () => {
     expect(replacementSelection?.details.scheduledBuyDate).toBe("2026-02-02");
     expect(replacementSelection?.companyId).not.toBe("exit");
     expect(result.positions.find((position) => position.entryDate === "2026-02-02")?.status).toBe("OPEN_AT_END");
+  });
+});
+
+describe("NSE Momentum historical runner", () => {
+  it("ranks by volatility-adjusted cross-sectional z-score momentum instead of raw returns", () => {
+    const result = simulateNseMomentum(nseMomentumMarketWith([
+      nseMomentumStock("highRawHighVol", {
+        oneMonthStartClose: 80,
+        threeMonthStartClose: 70,
+        endClose: 100,
+        volatilitySwing: 30,
+      }),
+      nseMomentumStock("steadyLeader", {
+        oneMonthStartClose: 90,
+        threeMonthStartClose: 85,
+        endClose: 100,
+        volatilitySwing: 0.2,
+      }),
+      nseMomentumStock("steadyLag", {
+        oneMonthStartClose: 98,
+        threeMonthStartClose: 97,
+        endClose: 100,
+        volatilitySwing: 0.2,
+      }),
+    ]), { rules: { maxPositions: 2, minVolatilityReturnCount: 20 } });
+
+    expect(result.positions.map((position) => position.companyId)).toEqual(["steadyLeader", "steadyLag"]);
+    expect(result.positions.some((position) => position.companyId === "highRawHighVol")).toBe(false);
+    expect(result.events.find((event) => event.companyId === "steadyLeader" && event.eventType === "BUY")?.details.momentumScore).toBeGreaterThan(0);
+  });
+
+  it("does not stop-loss and replaces only at the common monthly review using exit proceeds", () => {
+    const result = simulateNseMomentum(nseMomentumMarketWith([
+      nseMomentumStock("initialLeader", {
+        oneMonthStartClose: 90,
+        threeMonthStartClose: 85,
+        endClose: 100,
+        reviewOneMonthStartClose: 100,
+        reviewThreeMonthStartClose: 100,
+        reviewClose: 50,
+        volatilitySwing: 0.2,
+      }),
+      nseMomentumStock("replacement", {
+        oneMonthStartClose: 98,
+        threeMonthStartClose: 97,
+        endClose: 100,
+        reviewOneMonthStartClose: 90,
+        reviewThreeMonthStartClose: 85,
+        reviewClose: 120,
+        volatilitySwing: 0.2,
+      }),
+    ]), {
+      requestedEndDate: day("2026-02-05"),
+      rules: { maxPositions: 1, holdingRankThreshold: 1, minVolatilityReturnCount: 20 },
+    });
+
+    expect(result.events.some((event) => event.eventType === "STOP_TRIGGERED")).toBe(false);
+    expect(result.events.find((event) => event.eventType === "MONTHLY_REVIEW")?.eventDate).toBe("2026-02-02");
+    expect(result.positions.find((position) => position.companyId === "initialLeader")?.exitReason).toBe("MONTHLY_RANK_FAILURE");
+    const replacement = result.positions.find((position) => position.companyId === "replacement");
+    expect(replacement?.entryDate).toBe("2026-02-02");
+    expect(replacement?.allocation).toBeCloseTo(500_000, 4);
   });
 });
 
@@ -770,6 +834,79 @@ function momentumReplacementStock() {
       price(instrumentId, "2026-02-20", 105),
     ],
   };
+}
+
+function simulateNseMomentum(
+  market: { readonly candidates: HistoricalRunnerCandidate[]; readonly prices: HistoricalRunnerPrice[] },
+  options: {
+    readonly requestedStartDate?: Date;
+    readonly requestedEndDate?: Date;
+    readonly rules?: Partial<NseMomentumHistoricalRules>;
+  } = {},
+) {
+  return simulateNseMomentumHistorical({
+    requestedStartDate: options.requestedStartDate ?? day("2026-01-02"),
+    requestedEndDate: options.requestedEndDate ?? day("2026-02-20"),
+    candidates: market.candidates,
+    prices: market.prices,
+    rules: options.rules,
+  });
+}
+
+function nseMomentumMarketWith(stocks: ReturnType<typeof nseMomentumStock>[]) {
+  return {
+    candidates: stocks.map((stock) => stock.candidate),
+    prices: stocks.flatMap((stock) => stock.prices).sort((left, right) => left.tradingDate.getTime() - right.tradingDate.getTime()),
+  };
+}
+
+function nseMomentumStock(
+  id: string,
+  options: {
+    readonly oneMonthStartClose: number;
+    readonly threeMonthStartClose: number;
+    readonly endClose: number;
+    readonly reviewOneMonthStartClose?: number;
+    readonly reviewThreeMonthStartClose?: number;
+    readonly reviewClose?: number;
+    readonly volatilitySwing: number;
+  },
+) {
+  const instrumentId = `${id}-i`;
+  const overrides = new Map<string, number>([
+    ["2025-10-02", options.threeMonthStartClose],
+    ["2025-12-02", options.oneMonthStartClose],
+    ["2026-01-02", options.endClose],
+    ["2026-01-05", options.endClose],
+    ["2026-01-20", options.reviewOneMonthStartClose ?? options.endClose],
+    ["2026-02-02", options.reviewClose ?? options.endClose],
+    ["2026-02-03", options.reviewClose ?? options.endClose],
+    ["2026-02-04", options.reviewClose ?? options.endClose],
+    ["2026-02-05", options.reviewClose ?? options.endClose],
+  ]);
+  if (options.reviewThreeMonthStartClose !== undefined) {
+    overrides.set("2025-11-02", options.reviewThreeMonthStartClose);
+  }
+
+  return {
+    candidate: candidate(id),
+    prices: dateKeys("2025-01-02", "2026-02-20").map((date, index) => {
+      const override = overrides.get(date);
+      const base = options.endClose + (index % 2 === 0 ? options.volatilitySwing : -options.volatilitySwing);
+      return price(instrumentId, date, override ?? Math.max(base, 1));
+    }),
+  };
+}
+
+function dateKeys(start: string, end: string) {
+  const keys: string[] = [];
+  const cursor = day(start);
+  const last = day(end);
+  while (cursor <= last) {
+    keys.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return keys;
 }
 
 function qualifyingStock(

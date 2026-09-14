@@ -8,6 +8,7 @@ const protectedRoutes = [
   "/strategies",
   "/portfolio",
   "/stocks",
+  "/finding-momentum",
   "/screener",
   "/return-history",
   "/analytics",

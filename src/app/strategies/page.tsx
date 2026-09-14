@@ -21,7 +21,7 @@ export default async function StrategiesPage() {
     <section className="px-4 py-5 sm:px-6 lg:px-10">
       <div className="max-w-full min-w-0 max-w-7xl">
         <div className="mb-6">
-          <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
+          <p className="text-sm font-medium text-[var(--accent)]">REAL MARKET DATA</p>
           <h1 className="mt-2 text-3xl font-semibold">Strategies</h1>
         </div>
         <div className="grid gap-4 md:grid-cols-2">

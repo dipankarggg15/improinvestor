@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
-import type { MarketDataProvider, ProviderDailyCandle, ProviderInstrument } from "@/lib/market-data/types";
+import type { MarketDataProvider, ProviderDailyCandle, ProviderExchange, ProviderInstrument } from "@/lib/market-data/types";
 
 const realSource = "UPSTOX_REAL";
 
@@ -15,6 +15,9 @@ export type UpstoxSyncOptions = {
   readonly progressEvery?: number;
   readonly limit?: number;
   readonly symbols?: readonly string[];
+  readonly exchanges?: readonly ProviderExchange[];
+  readonly startDate?: Date;
+  readonly endDate?: Date;
   readonly now?: Date;
 };
 
@@ -99,16 +102,24 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
   }
 
   const startedAt = new Date();
-  const endDate = latestCompletedEodDate(options.now);
-  const backfillStartDate = marketHistoryStartDate(endDate, options.years ?? 1);
+  const endDate = options.endDate ?? latestCompletedEodDate(options.now);
+  const backfillStartDate = options.startDate ?? marketHistoryStartDate(endDate, options.years ?? 1);
   const allInstruments = await options.provider.fetchInstruments();
+  const allowedExchanges = new Set(options.exchanges);
+  const syncInstruments = allowedExchanges.size === 0
+    ? allInstruments
+    : allInstruments.filter((instrument) => allowedExchanges.has(instrument.exchange));
   const allowedSymbols = new Set(options.symbols?.map((symbol) => symbol.toUpperCase()));
-  const companies = canonicalizeUpstoxEquities(allInstruments)
+  const companies = canonicalizeUpstoxEquities(syncInstruments)
     .filter((company) => allowedSymbols.size === 0 || allowedSymbols.has(company.canonicalInstrument.symbol.toUpperCase()))
     .slice(0, options.limit);
+  const syncTargets = companies.flatMap((company) => (
+    company.instruments.map((instrument) => ({ company, instrument }))
+  ));
   const syncJob = await createSyncJob(options.client, {
     mode: options.mode,
     totalCompanies: companies.length,
+    totalInstruments: syncTargets.length,
     endDate,
     startedAt,
   });
@@ -119,10 +130,13 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
   const failures: Array<{ readonly symbol: string; readonly instrumentKey: string; readonly error: string }> = [];
   const progressEvery = Math.max(1, options.progressEvery ?? 25);
 
-  await mapConcurrent(companies, Math.max(1, options.concurrency ?? 2), async (company) => {
-    const instrument = company.canonicalInstrument;
+  await mapConcurrent(syncTargets, Math.max(1, options.concurrency ?? 2), async ({ company, instrument }) => {
     try {
-      const stored = await upsertCompanyAndInstruments(options.client, company);
+      const stored = await upsertCompanyAndInstruments(options.client, {
+        ...company,
+        instruments: [instrument],
+        canonicalInstrument: instrument,
+      });
       const storedCanonical = stored.find((row) => row.instrumentKey === instrument.instrumentKey);
       if (!storedCanonical) {
         throw new Error("Canonical instrument was not stored.");
@@ -137,13 +151,14 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
         return;
       }
 
-      const candles = await withRetry(() => options.provider.fetchHistoricalDailyCandles({
+      const candles = await fetchHistoricalDailyCandlesInChunks(options.provider, {
         instrumentKey: instrument.instrumentKey,
         startDate,
         endDate,
-      }));
+      });
       validateCandles(candles, endDate);
-      candlesUpserted += await upsertDailyPrices(options.client, storedCanonical.id, candles);
+      const upserted = await upsertDailyPrices(options.client, storedCanonical.id, candles);
+      candlesUpserted += upserted;
       successful += 1;
     } catch (error) {
       failures.push({
@@ -153,7 +168,7 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
       });
     } finally {
       processed += 1;
-      if (processed % progressEvery === 0 || processed === companies.length) {
+      if (processed % progressEvery === 0 || processed === syncTargets.length) {
         await updateSyncProgress(options.client, syncJob.id, { processed, successful, skipped, failures, candlesUpserted });
       }
     }
@@ -161,7 +176,7 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
 
   const completedAt = new Date();
   const result: UpstoxSyncResult = {
-    totalInstruments: allInstruments.length,
+    totalInstruments: syncTargets.length,
     totalCompanies: companies.length,
     processed,
     successful,
@@ -173,11 +188,62 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
     startDate: backfillStartDate,
     endDate,
     failures,
-    universeCounts: universeCounts(allInstruments),
+    universeCounts: universeCounts(syncInstruments),
   };
 
   await completeSyncJob(options.client, syncJob.id, result, options.mode);
   return result;
+}
+
+async function fetchHistoricalDailyCandlesInChunks(
+  provider: MarketDataProvider,
+  input: { readonly instrumentKey: string; readonly startDate: Date; readonly endDate: Date },
+) {
+  const candles: ProviderDailyCandle[] = [];
+
+  const ranges = decadeOrSmallerDateRanges(input.startDate, input.endDate);
+  for (const [index, range] of ranges.entries()) {
+    candles.push(
+      ...await withRetry(() => provider.fetchHistoricalDailyCandles({
+        instrumentKey: input.instrumentKey,
+        startDate: range.startDate,
+        endDate: range.endDate,
+      })),
+    );
+    if (index < ranges.length - 1) {
+      await delay(250);
+    }
+  }
+
+  const byDate = new Map(candles.map((candle) => [candle.tradingDate.toISOString().slice(0, 10), candle]));
+  return [...byDate.values()].sort((left, right) => left.tradingDate.getTime() - right.tradingDate.getTime());
+}
+
+function decadeOrSmallerDateRanges(startDate: Date, endDate: Date) {
+  const ranges: Array<{ readonly startDate: Date; readonly endDate: Date }> = [];
+  let cursor = new Date(startDate);
+
+  while (cursor <= endDate) {
+    const chunkEnd = addYears(cursor, 10);
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() - 1);
+    const cappedEnd = chunkEnd < endDate ? chunkEnd : new Date(endDate);
+    ranges.push({ startDate: new Date(cursor), endDate: cappedEnd });
+    cursor = addDays(cappedEnd, 1);
+  }
+
+  return ranges;
+}
+
+function addYears(date: Date, years: number) {
+  const next = new Date(date);
+  next.setUTCFullYear(next.getUTCFullYear() + years);
+  return next;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
 }
 
 function bestName(instruments: readonly ProviderInstrument[]) {
@@ -274,6 +340,9 @@ async function upsertDailyPrices(client: PrismaClient, instrumentId: string, can
     data: candles.map((candle) => ({
       instrumentId,
       tradingDate: candle.tradingDate,
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
       close: candle.close,
       volume: candle.volume,
       marketDataSource: realSource,
@@ -284,7 +353,7 @@ async function upsertDailyPrices(client: PrismaClient, instrumentId: string, can
   return candles.length;
 }
 
-async function withRetry<T>(operation: () => Promise<T>, attempts = 4) {
+async function withRetry<T>(operation: () => Promise<T>, attempts = 8) {
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
@@ -292,7 +361,11 @@ async function withRetry<T>(operation: () => Promise<T>, attempts = 4) {
     } catch (error) {
       lastError = error;
       if (attempt === attempts) break;
-      await delay(250 * (2 ** (attempt - 1)));
+      const message = error instanceof Error ? error.message : "";
+      const waitMs = message.includes("rate limit")
+        ? Math.min(60_000, 10_000 * attempt)
+        : 250 * (2 ** (attempt - 1));
+      await delay(waitMs);
     }
   }
   throw lastError;
@@ -316,7 +389,13 @@ async function mapConcurrent<T>(items: readonly T[], concurrency: number, worker
 
 async function createSyncJob(
   client: PrismaClient,
-  metadata: { readonly mode: UpstoxSyncMode; readonly totalCompanies: number; readonly endDate: Date; readonly startedAt: Date },
+  metadata: {
+    readonly mode: UpstoxSyncMode;
+    readonly totalCompanies: number;
+    readonly totalInstruments: number;
+    readonly endDate: Date;
+    readonly startedAt: Date;
+  },
 ) {
   const db = client as unknown as RealMarketPrismaClient;
   await db.dataSync.updateMany({
@@ -341,6 +420,7 @@ async function createSyncJob(
         marketDataSource: realSource,
         mode: metadata.mode,
         totalCompanies: metadata.totalCompanies,
+        totalInstruments: metadata.totalInstruments,
         completedEodThrough: metadata.endDate.toISOString().slice(0, 10),
         startedAt: metadata.startedAt.toISOString(),
       },

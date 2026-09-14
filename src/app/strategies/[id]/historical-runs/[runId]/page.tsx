@@ -8,6 +8,7 @@ import {
   getHistoricalStrategyRun,
   isEarlySuperstarsHistoricalStrategy,
   isMomentum10HistoricalStrategy,
+  isNseMomentumHistoricalStrategy,
 } from "@/lib/strategies/historical-run-service";
 import { formatCurrency, formatDate, formatPercent, formatQuantity } from "@/lib/ui/format";
 
@@ -29,6 +30,8 @@ export default async function HistoricalStrategyRunPage({
     ? entryMomentumLabelForEarlySuperstarsVariant(run.strategy.name, run.strategyVersion.config)
     : isMomentum10HistoricalStrategy(run.strategy.name)
       ? "1M"
+      : isNseMomentumHistoricalStrategy(run.strategy.name)
+        ? "Score"
       : "Entry";
   const strategyDisplayName = isEarlySuperstarsHistoricalStrategy(run.strategy.name)
     ? `Early Superstars - ${entryMomentumLabel} Entry`
@@ -210,7 +213,7 @@ async function completeRunningMomentum10Run(input: { readonly strategyId: string
     },
   });
 
-  if (!run || !isMomentum10HistoricalStrategy(run.strategy.name)) return;
+  if (!run || (!isMomentum10HistoricalStrategy(run.strategy.name) && !isNseMomentumHistoricalStrategy(run.strategy.name))) return;
 
   await completeEarlySuperstarsHistoricalRun({ client: prisma, runId: run.id });
 }

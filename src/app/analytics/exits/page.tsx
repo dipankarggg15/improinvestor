@@ -42,7 +42,7 @@ export default async function ExitAnalyticsPage({ searchParams }: ExitAnalyticsP
       <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-[var(--accent)]">SYNTHETIC MARKET DATA</p>
+            <p className="text-sm font-medium text-[var(--accent)]">REAL MARKET DATA</p>
             <h1 className="mt-2 text-3xl font-semibold">Exit Analytics</h1>
             <p className="mt-2 text-sm text-[var(--muted)]">Closed position episodes, stored exit snapshots, and post-exit observations.</p>
           </div>

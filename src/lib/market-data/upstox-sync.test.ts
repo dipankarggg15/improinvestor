@@ -42,12 +42,12 @@ describe("Upstox real-market sync", () => {
       now: new Date("2026-09-08T08:00:00.000Z"),
     });
 
-    expect(result.successful).toBe(1);
+    expect(result.successful).toBe(2);
     expect(result.failed).toBe(0);
-    expect(result.candlesUpserted).toBe(2);
+    expect(result.candlesUpserted).toBe(4);
     expect(client.state.companies).toHaveLength(1);
     expect(client.state.instruments).toHaveLength(2);
-    expect(client.state.dailyPrices).toHaveLength(2);
+    expect(client.state.dailyPrices).toHaveLength(4);
     expect(client.state.dailyPrices.every((price) => price.marketDataSource === "UPSTOX_REAL")).toBe(true);
   });
 
@@ -86,7 +86,9 @@ describe("Upstox real-market sync", () => {
           instrument({ exchange: "NSE", symbol: "TCS", instrumentKey: "NSE_EQ|INE467B01029", isin: "INE467B01029" }),
         ],
         onCandles(input) {
-          if (input.instrumentKey.includes("INE467B")) throw new Error("simulated Upstox failure");
+          if (input.instrumentKey.includes("INE467B")) {
+            return [{ ...candle(input.instrumentKey, "2026-09-07"), high: "90" }];
+          }
           return [candle(input.instrumentKey, "2026-09-07")];
         },
       }),
