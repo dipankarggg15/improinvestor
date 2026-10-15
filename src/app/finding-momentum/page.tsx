@@ -1,17 +1,25 @@
 import { prisma } from "@/lib/db/prisma";
-import { getFindingMomentum, parseFindingMomentumDate } from "@/lib/finding-momentum/service";
+import {
+  findingMomentumOptions,
+  getFindingMomentum,
+  parseFindingMomentumDate,
+  parseFindingMomentumOption,
+} from "@/lib/finding-momentum/service";
 import { formatCurrency, formatPercent } from "@/lib/ui/format";
 
 export const dynamic = "force-dynamic";
 
 type FindingMomentumPageProps = {
-  readonly searchParams: Promise<{ readonly date?: string }>;
+  readonly searchParams: Promise<{ readonly date?: string; readonly option?: string }>;
 };
 
 export default async function FindingMomentumPage({ searchParams }: FindingMomentumPageProps) {
   const query = await searchParams;
   const selectedDate = parseFindingMomentumDate(query.date);
-  const result = await getFindingMomentum({ client: prisma, selectedDate });
+  const option = parseFindingMomentumOption(query.option);
+  const result = await getFindingMomentum({ client: prisma, selectedDate, option });
+  const [firstMonths, secondMonths] = result.selectedOption.months;
+  const isVolatilityAdjusted = result.selectedOption.rankingMode === "volatilityAdjusted";
 
   return (
     <section className="px-4 py-5 sm:px-6 lg:px-10">
@@ -22,6 +30,18 @@ export default async function FindingMomentumPage({ searchParams }: FindingMomen
             <h1 className="mt-2 text-3xl font-semibold">Finding Momentum</h1>
           </div>
           <form className="flex flex-wrap items-end gap-3" method="get">
+            <label className="grid gap-2 text-sm font-medium">
+              Momentum option
+              <select
+                className="h-11 rounded-md border border-[var(--border)] bg-[var(--panel)] px-3"
+                defaultValue={result.selectedOption.value}
+                name="option"
+              >
+                {findingMomentumOptions.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            </label>
             <label className="grid gap-2 text-sm font-medium">
               Date
               <input
@@ -38,37 +58,19 @@ export default async function FindingMomentumPage({ searchParams }: FindingMomen
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="Data Updated Through" value={result.dataUpdatedThrough ?? "-"} />
-          <Stat label="Latest Upstox EOD" value={result.latestUpstoxCompletedTradingDate ?? "-"} />
+          <Stat label="Requested Date" value={result.selectedDate} />
+          <Stat label="Local Market Data Through" value={result.dataUpdatedThrough ?? "-"} />
           <Stat label="Ranking Date Used" value={result.rankingDateUsed ?? "-"} />
-          <Stat label="Eligible NSE Universe" value={result.eligibleUniverseCount.toLocaleString("en-IN")} />
+          <Stat label="Eligible NSE Stocks (ETFs Excluded)" value={result.eligibleUniverseCount.toLocaleString("en-IN")} />
         </div>
-
-        {result.sync.error ? (
-          <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-            Upstox freshness/update check could not complete: {result.sync.error}. Showing rankings from the local database through {result.dataUpdatedThrough ?? "the latest available local date"}.
-          </div>
-        ) : null}
-
-        {result.sync.ran ? (
-          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
-            Updated NSE daily prices from {result.sync.startDate} to {result.sync.endDate}: {result.sync.candlesUpserted.toLocaleString("en-IN")} candles added, {result.sync.skipped.toLocaleString("en-IN")} instruments already current, {result.sync.failed.toLocaleString("en-IN")} failures.
-          </div>
-        ) : null}
-
-        {result.rankingDateUsed && result.rankingDateUsed !== result.selectedDate ? (
-          <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-            Selected date {result.selectedDate} was not a local NSE trading day. Ranking uses {result.rankingDateUsed}.
-          </div>
-        ) : null}
 
         <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold">Top 60 NSE Momentum</h2>
-            <p className="text-sm text-[var(--muted)]">{result.rankingDateUsed ?? "-"} ranking</p>
+            <p className="text-sm text-[var(--muted)]">{result.selectedOption.label} · {result.rankingDateUsed ?? "-"}</p>
           </div>
           <div className="mt-4 max-w-full overflow-x-auto">
-            <table className="w-full min-w-[1280px] text-left text-sm">
+            <table className={`w-full text-left text-sm ${isVolatilityAdjusted ? "min-w-[1280px]" : "min-w-[800px]"}`}>
               <thead className="text-xs uppercase text-[var(--muted)]">
                 <tr>
                   {[
@@ -76,14 +78,16 @@ export default async function FindingMomentumPage({ searchParams }: FindingMomen
                     "Company",
                     "Symbol",
                     "Close",
-                    "1M Return %",
-                    "3M Return %",
-                    "1Y Annualized Volatility %",
-                    "1M / Volatility",
-                    "3M / Volatility",
-                    "1M Z-Score",
-                    "3M Z-Score",
-                    "Momentum Score",
+                    `${firstMonths}M Return %`,
+                    `${secondMonths}M Return %`,
+                    ...(isVolatilityAdjusted ? [
+                      "1Y Annualized Volatility %",
+                      `${firstMonths}M / Volatility`,
+                      `${secondMonths}M / Volatility`,
+                      `${firstMonths}M Z-Score`,
+                      `${secondMonths}M Z-Score`,
+                    ] : []),
+                    isVolatilityAdjusted ? "Momentum Z-Score" : "Raw Average Return %",
                   ].map((head) => (
                     <th className="py-2 pr-3" key={head}>{head}</th>
                   ))}
@@ -98,14 +102,20 @@ export default async function FindingMomentumPage({ searchParams }: FindingMomen
                     </td>
                     <td className="py-3 pr-3">{row.symbol}</td>
                     <td className="py-3 pr-3">{formatCurrency(row.close)}</td>
-                    <td className="py-3 pr-3">{formatPercent(row.return1M)}</td>
-                    <td className="py-3 pr-3">{formatPercent(row.return3M)}</td>
-                    <td className="py-3 pr-3">{formatPercent(row.annualizedVolatilityPercent)}</td>
-                    <td className="py-3 pr-3">{formatNumber(row.riskAdjusted1M / 100)}</td>
-                    <td className="py-3 pr-3">{formatNumber(row.riskAdjusted3M / 100)}</td>
-                    <td className="py-3 pr-3">{formatNumber(row.z1M)}</td>
-                    <td className="py-3 pr-3">{formatNumber(row.z3M)}</td>
-                    <td className="py-3 pr-3 font-semibold">{formatNumber(row.momentumScore)}</td>
+                    <td className="py-3 pr-3">{formatPercent(row.firstReturn)}</td>
+                    <td className="py-3 pr-3">{formatPercent(row.secondReturn)}</td>
+                    {isVolatilityAdjusted ? (
+                      <>
+                        <td className="py-3 pr-3">{formatOptionalPercent(row.annualizedVolatilityPercent)}</td>
+                        <td className="py-3 pr-3">{formatOptionalNumber(row.firstRiskAdjusted)}</td>
+                        <td className="py-3 pr-3">{formatOptionalNumber(row.secondRiskAdjusted)}</td>
+                        <td className="py-3 pr-3">{formatOptionalNumber(row.firstZScore)}</td>
+                        <td className="py-3 pr-3">{formatOptionalNumber(row.secondZScore)}</td>
+                      </>
+                    ) : null}
+                    <td className="py-3 pr-3 font-semibold">
+                      {isVolatilityAdjusted ? formatNumber(row.momentumScore) : formatPercent(row.momentumScore)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -132,4 +142,12 @@ function formatNumber(value: number) {
     maximumFractionDigits: 4,
     minimumFractionDigits: 4,
   });
+}
+
+function formatOptionalNumber(value: number | null) {
+  return value === null ? "-" : formatNumber(value);
+}
+
+function formatOptionalPercent(value: number | null) {
+  return value === null ? "-" : formatPercent(value);
 }

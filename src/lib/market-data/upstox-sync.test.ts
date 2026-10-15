@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { MarketDataProvider, ProviderDailyCandle, ProviderInstrument } from "@/lib/market-data/types";
 import {
@@ -10,6 +10,32 @@ import {
 } from "@/lib/market-data/upstox-sync";
 
 describe("Upstox real-market sync", () => {
+  it("waits for the full provider cooldown before retrying", async () => {
+    vi.useFakeTimers();
+    try {
+      let requests = 0;
+      const run = runUpstoxRealMarketSync({
+        client: createFakePrisma() as never,
+        provider: providerWith({
+          instruments: [instrument({ exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|INE002A01018", isin: "INE002A01018" })],
+          onCandles(input) {
+            if (++requests === 1) throw Object.assign(new Error("Upstox rate limit exceeded."), { retryAfterMs: 310000 });
+            return [candle(input.instrumentKey, "2026-09-07")];
+          },
+        }),
+        mode: "backfill",
+        startDate: new Date("2026-09-01"),
+        endDate: new Date("2026-09-07"),
+      });
+      await vi.advanceTimersByTimeAsync(309999);
+      expect(requests).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await run).successful).toBe(1);
+      expect(requests).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("canonicalizes dual-listed companies by ISIN and prefers NSE", () => {
     const companies = canonicalizeUpstoxEquities([
       instrument({ exchange: "BSE", symbol: "500325", instrumentKey: "BSE_EQ|INE002A01018", isin: "INE002A01018" }),
@@ -29,7 +55,7 @@ describe("Upstox real-market sync", () => {
 
   it("backfills a small batch idempotently with company, instrument, and candle upserts", async () => {
     const client = createFakePrisma();
-    const result = await runUpstoxRealMarketSync({
+    const options = {
       client: client as never,
       provider: providerWith({
         instruments: [
@@ -37,18 +63,21 @@ describe("Upstox real-market sync", () => {
           instrument({ exchange: "BSE", symbol: "500325", instrumentKey: "BSE_EQ|INE002A01018", isin: "INE002A01018" }),
         ],
       }),
-      mode: "backfill",
+      mode: "backfill" as const,
       limit: 1,
       now: new Date("2026-09-08T08:00:00.000Z"),
-    });
+    };
+    const result = await runUpstoxRealMarketSync(options);
 
-    expect(result.successful).toBe(1);
+    expect(result.successful).toBe(2);
     expect(result.failed).toBe(0);
-    expect(result.candlesUpserted).toBe(2);
+    expect(result.candlesUpserted).toBe(4);
     expect(client.state.companies).toHaveLength(1);
     expect(client.state.instruments).toHaveLength(2);
-    expect(client.state.dailyPrices).toHaveLength(2);
+    expect(client.state.dailyPrices).toHaveLength(4);
     expect(client.state.dailyPrices.every((price) => price.marketDataSource === "UPSTOX_REAL")).toBe(true);
+    expect((await runUpstoxRealMarketSync(options)).candlesUpserted).toBe(0);
+    expect(client.state.dailyPrices).toHaveLength(4);
   });
 
   it("incremental sync starts after the latest stored candle", async () => {
@@ -78,26 +107,33 @@ describe("Upstox real-market sync", () => {
   });
 
   it("records failed instruments without failing the whole sync", async () => {
-    const result = await runUpstoxRealMarketSync({
-      client: createFakePrisma() as never,
-      provider: providerWith({
-        instruments: [
-          instrument({ exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|INE002A01018", isin: "INE002A01018" }),
-          instrument({ exchange: "NSE", symbol: "TCS", instrumentKey: "NSE_EQ|INE467B01029", isin: "INE467B01029" }),
-        ],
-        onCandles(input) {
-          if (input.instrumentKey.includes("INE467B")) throw new Error("simulated Upstox failure");
-          return [candle(input.instrumentKey, "2026-09-07")];
-        },
-      }),
-      mode: "backfill",
-      limit: 2,
-      now: new Date("2026-09-08T08:00:00.000Z"),
-    });
+    vi.useFakeTimers();
+    try {
+      const run = runUpstoxRealMarketSync({
+        client: createFakePrisma() as never,
+        provider: providerWith({
+          instruments: [
+            instrument({ exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|INE002A01018", isin: "INE002A01018" }),
+            instrument({ exchange: "NSE", symbol: "TCS", instrumentKey: "NSE_EQ|INE467B01029", isin: "INE467B01029" }),
+          ],
+          onCandles(input) {
+            if (input.instrumentKey.includes("INE467B")) throw new Error("simulated Upstox failure");
+            return [candle(input.instrumentKey, "2026-09-07")];
+          },
+        }),
+        mode: "backfill",
+        limit: 2,
+        now: new Date("2026-09-08T08:00:00.000Z"),
+      });
 
-    expect(result.successful).toBe(1);
-    expect(result.failed).toBe(1);
-    expect(result.failures[0]?.symbol).toBe("TCS");
+      await vi.runAllTimersAsync();
+      const result = await run;
+      expect(result.successful).toBe(1);
+      expect(result.failed).toBe(1);
+      expect(result.failures[0]?.symbol).toBe("TCS");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

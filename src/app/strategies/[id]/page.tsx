@@ -4,13 +4,15 @@ import { notFound } from "next/navigation";
 import {
   assignOpenEpisodeStrategyVersionAction,
   cloneStrategyVersionAction,
+  deleteHistoricalStrategyRunAction,
+  deleteStrategyRunAction,
   runEarlySuperstarsHistoricalAction,
   runStrategyAction,
 } from "@/app/strategies/actions";
 import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
 import { prisma } from "@/lib/db/prisma";
 import { strategyConfigForDisplay } from "@/lib/strategies/config";
-import { entryMomentumLabelForEarlySuperstarsVariant, isAutomatedHistoricalStrategy, isEarlySuperstarsHistoricalStrategy, isMomentum10HistoricalStrategy, isNseMomentumHistoricalStrategy } from "@/lib/strategies/historical-run-service";
+import { entryMomentumLabelForEarlySuperstarsVariant, isAutomatedHistoricalStrategy, isEarlySuperstarsHistoricalStrategy, isMomentum10HistoricalStrategy, isNseMomentumHistoricalStrategy, isParentNseMomentumHistoricalStrategy } from "@/lib/strategies/historical-run-service";
 import { listStrategyLiveHoldings } from "@/lib/strategies/live-holdings";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/ui/format";
 
@@ -49,6 +51,8 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
     ? entryMomentumLabelForEarlySuperstarsVariant(strategy.name, config)
     : isMomentum10HistoricalStrategy(strategy.name)
       ? "1M"
+      : isParentNseMomentumHistoricalStrategy(strategy.name, config)
+        ? "Score"
       : isNseMomentumHistoricalStrategy(strategy.name)
         ? "Score"
     : null;
@@ -80,7 +84,7 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
       <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div>
           <p className="text-sm font-medium text-[var(--accent)]">
-            {isAutomatedHistoricalStrategy(strategy.name) ? "REAL MARKET DATA" : "SYNTHETIC MARKET DATA"}
+            {isAutomatedHistoricalStrategy(strategy.name, config) ? "REAL MARKET DATA" : "SYNTHETIC MARKET DATA"}
           </p>
           <h1 className="mt-2 text-3xl font-semibold">{strategyDisplayName}</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--muted)]">{strategy.description}</p>
@@ -95,9 +99,13 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
           </div>
 
           <div className="space-y-4">
-            {isAutomatedHistoricalStrategy(strategy.name) ? (
+            {isAutomatedHistoricalStrategy(strategy.name, config) ? (
               <form action={runHistoricalStrategy} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
                 <div className="grid gap-3">
+                  <StrategyVersionSelect
+                    currentVersionId={currentVersion?.id}
+                    versions={strategy.versions}
+                  />
                   <label className="grid gap-2 text-sm font-medium">
                     Start Date
                     <input
@@ -130,6 +138,11 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
               </form>
             ) : (
               <form action={runStrategy} className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
+                <div className="grid gap-3">
+                  <StrategyVersionSelect
+                    currentVersionId={currentVersion?.id}
+                    versions={strategy.versions}
+                  />
                   <label className="grid gap-2 text-sm font-medium">
                   Start Date
                   <input
@@ -138,8 +151,8 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                     name="startDate"
                     type="date"
                   />
-                </label>
-                <label className="mt-3 grid gap-2 text-sm font-medium">
+                  </label>
+                  <label className="grid gap-2 text-sm font-medium">
                   End Date
                   <input
                     className="h-11 rounded-md border border-[var(--border)] px-3"
@@ -147,7 +160,8 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                     name="endDate"
                     type="date"
                   />
-                </label>
+                  </label>
+                </div>
                 <ConfirmSubmitButton
                   className="mt-4 h-11 w-full rounded-md bg-[var(--accent)] text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                   confirmMessage="Run the current strategy version at the start date and calculate returns through the end date?"
@@ -169,14 +183,14 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
           </div>
         </div>
 
-        {isAutomatedHistoricalStrategy(strategy.name) ? (
+        {isAutomatedHistoricalStrategy(strategy.name, config) ? (
           <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
             <h2 className="text-lg font-semibold">Automated Historical Runs</h2>
             <div className="mt-4 max-w-full overflow-x-auto">
               <table className="w-full min-w-[900px] text-left text-sm">
                 <thead className="text-xs uppercase text-[var(--muted)]">
                   <tr>
-                    {["Requested", "Effective", "Entry", "Version", "Return", "CAGR", "Trades", "Open At End", "Status"].map((head) => (
+                    {["Requested", "Effective", "Entry", "Version", "Return", "CAGR", "Trades", "Open At End", "Status", "Actions"].map((head) => (
                       <th className="py-2 pr-3" key={head}>{head}</th>
                     ))}
                   </tr>
@@ -199,6 +213,17 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                       <td className="py-3 pr-3">{run.tradeCount}</td>
                       <td className="py-3 pr-3">{run.endingOpenPositionCount}</td>
                       <td className="py-3 pr-3">{run.status}</td>
+                      <td className="py-3 pr-3">
+                        <form action={deleteHistoricalStrategyRunAction.bind(null, strategy.id, run.id)}>
+                          <ConfirmSubmitButton
+                            className="h-8 rounded-md border border-red-300 px-3 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            confirmMessage={`Delete this V${run.strategyVersion.versionNumber} historical test and all of its stored results? This cannot be undone.`}
+                            pendingLabel="Deleting..."
+                          >
+                            Delete
+                          </ConfirmSubmitButton>
+                        </form>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -212,9 +237,8 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
           <h2 className="text-lg font-semibold">Versions</h2>
           <div className="mt-4 grid gap-2 text-sm">
             {strategy.versions.map((version) => (
-              <div className="flex justify-between rounded-md bg-[var(--panel-soft)] px-3 py-2" key={version.id}>
+              <div className="rounded-md bg-[var(--panel-soft)] px-3 py-2" key={version.id}>
                 <span>V{version.versionNumber} {version.label ? `- ${version.label}` : ""}</span>
-                <span className="text-[var(--muted)]">Effective {formatDate(version.effectiveFrom)}</span>
               </div>
             ))}
           </div>
@@ -289,7 +313,7 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
           </div>
         ) : null}
 
-        {!isAutomatedHistoricalStrategy(strategy.name) ? (
+        {!isAutomatedHistoricalStrategy(strategy.name, config) ? (
           <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
             <h2 className="text-lg font-semibold">Historical Runs</h2>
             <div className="mt-4 max-w-full overflow-x-auto">
@@ -302,6 +326,7 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                     <th>Eligible</th>
                     <th>Selected</th>
                     <th>Status</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -317,6 +342,17 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                       <td>{run.eligibleCount}</td>
                       <td>{run.selectedCount}</td>
                       <td>{run.status}</td>
+                      <td className="py-3">
+                        <form action={deleteStrategyRunAction.bind(null, strategy.id, run.id)}>
+                          <ConfirmSubmitButton
+                            className="h-8 rounded-md border border-red-300 px-3 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            confirmMessage={`Delete the V${run.strategyVersion.versionNumber} test from ${formatDate(run.runDate)}? This cannot be undone.`}
+                            pendingLabel="Deleting..."
+                          >
+                            Delete
+                          </ConfirmSubmitButton>
+                        </form>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -326,6 +362,36 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
         ) : null}
       </div>
     </section>
+  );
+}
+
+function StrategyVersionSelect({
+  currentVersionId,
+  versions,
+}: {
+  readonly currentVersionId?: string;
+  readonly versions: readonly {
+    readonly id: string;
+    readonly versionNumber: number;
+    readonly label: string | null;
+  }[];
+}) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      Strategy Version
+      <select
+        className="h-11 rounded-md border border-[var(--border)] bg-[var(--panel)] px-3"
+        defaultValue={currentVersionId}
+        name="strategyVersionId"
+        required
+      >
+        {versions.map((version) => (
+          <option key={version.id} value={version.id}>
+            V{version.versionNumber}{version.label ? ` - ${version.label}` : ""}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 

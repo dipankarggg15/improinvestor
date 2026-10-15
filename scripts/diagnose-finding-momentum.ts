@@ -433,6 +433,7 @@ function maxNumericalDifferences(
   };
 
   for (const row of existing) {
+    if (row.z1M === null || row.z3M === null) throw new Error("This diagnostic requires 1M/3M ranking metrics.");
     const other = independentByCompany.get(row.companyId);
     if (!other) continue;
     diffs.return1M = Math.max(diffs.return1M, Math.abs(row.return1M - other.return1M));

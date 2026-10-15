@@ -178,12 +178,13 @@ describe("createUpstoxMarketDataProvider", () => {
       token: "secret-token",
     });
     const rateLimitProvider = createUpstoxMarketDataProviderCore({
-      fetch: async () => new Response(null, { status: 429 }),
+      fetch: async () => new Response(null, { status: 429, headers: { "retry-after": "310" } }),
       token: "secret-token",
     });
 
     await expect(authProvider.fetchCurrentQuote({ instrumentKey: "NSE_EQ|INE002A01018" })).rejects.toThrow("Upstox authentication failed.");
     await expect(rateLimitProvider.fetchCurrentQuote({ instrumentKey: "NSE_EQ|INE002A01018" })).rejects.toThrow("Upstox rate limit exceeded.");
+    await expect(rateLimitProvider.fetchCurrentQuote({ instrumentKey: "NSE_EQ|INE002A01018" })).rejects.toMatchObject({ retryAfterMs: 310000 });
   });
 });
 

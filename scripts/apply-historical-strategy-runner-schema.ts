@@ -42,6 +42,7 @@ $$;
       "unavailableFilters" JSONB NOT NULL,
       limitations JSONB NOT NULL,
       assumptions JSONB NOT NULL,
+      "reportMetrics" JSONB,
       "errorMessage" TEXT,
       "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "completedAt" TIMESTAMP(3),
@@ -51,6 +52,7 @@ $$;
       CONSTRAINT "HistoricalStrategyRun_strategyVersionId_fkey"
         FOREIGN KEY ("strategyVersionId") REFERENCES "StrategyVersion"(id) ON DELETE RESTRICT ON UPDATE CASCADE
     )`,
+    `ALTER TABLE "HistoricalStrategyRun" ADD COLUMN IF NOT EXISTS "reportMetrics" JSONB`,
     `CREATE TABLE IF NOT EXISTS "HistoricalStrategyPosition" (
       id TEXT PRIMARY KEY,
       "runId" TEXT NOT NULL,
@@ -115,6 +117,7 @@ $$;
     `CREATE INDEX IF NOT EXISTS "HistoricalStrategyPosition_instrumentId_idx" ON "HistoricalStrategyPosition" ("instrumentId")`,
     `CREATE INDEX IF NOT EXISTS "HistoricalStrategyEvent_runId_eventDate_idx" ON "HistoricalStrategyEvent" ("runId", "eventDate")`,
     `CREATE INDEX IF NOT EXISTS "HistoricalStrategyEvent_runId_eventType_idx" ON "HistoricalStrategyEvent" ("runId", "eventType")`,
+    `CREATE INDEX IF NOT EXISTS "HistoricalStrategyEvent_positionId_idx" ON "HistoricalStrategyEvent" ("positionId")`,
     `CREATE INDEX IF NOT EXISTS "HistoricalStrategyEvent_companyId_idx" ON "HistoricalStrategyEvent" ("companyId")`,
     `CREATE INDEX IF NOT EXISTS "HistoricalStrategyEvent_instrumentId_idx" ON "HistoricalStrategyEvent" ("instrumentId")`,
     `CREATE UNIQUE INDEX IF NOT EXISTS "HistoricalStrategyDailyEquity_runId_date_key" ON "HistoricalStrategyDailyEquity" ("runId", date)`,

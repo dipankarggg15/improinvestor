@@ -27,6 +27,7 @@
     "schema:historical-strategy": "tsx scripts/apply-historical-strategy-runner-schema.ts",
     "measure:market-storage": "tsx scripts/measure-market-storage.ts",
     "validate:real-market": "tsx scripts/validate-real-market-import.ts",
+    "cleanup:dummy-data": "tsx scripts/cleanup-dummy-data.ts",
     "verify:strategies": "tsx scripts/verify-strategy-runs.ts",
     "check:production-config": "tsx scripts/check-production-config.ts",
     "postinstall": "prisma generate"

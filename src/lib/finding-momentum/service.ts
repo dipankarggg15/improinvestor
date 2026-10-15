@@ -1,20 +1,46 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { createUpstoxMarketDataProviderCore } from "@/lib/market-data/providers/upstox-core";
-import { runUpstoxRealMarketSync } from "@/lib/market-data/upstox-sync";
 import {
+  nseMomentumHistoricalRules,
   rankNseMomentumForDate,
   type HistoricalRunnerCandidate,
   type HistoricalRunnerPrice,
+  type NseMomentumHistoricalRules,
   type NseMomentumRankedCandidate,
 } from "@/lib/strategies/historical-runner";
+import {
+  isEligibleNseOrdinaryEquityInstrument,
+  NSE_ORDINARY_EQUITY_INSTRUMENT_KEY_PREFIX,
+} from "@/lib/strategies/nse-universe";
 
 const realSource = "UPSTOX_REAL";
-const nseInstrumentKeyPrefix = "NSE_EQ|INE";
 const priceLoadBatchSize = 500;
+
+export const findingMomentumOptions = [
+  { value: "volatility-1m-3m", label: "1M / 3M - Volatility + Z-Score", months: [1, 3], rankingMode: "volatilityAdjusted" },
+  { value: "volatility-3m-6m", label: "3M / 6M - Volatility + Z-Score", months: [3, 6], rankingMode: "volatilityAdjusted" },
+  { value: "volatility-6m-12m", label: "6M / 12M - Volatility + Z-Score", months: [6, 12], rankingMode: "volatilityAdjusted" },
+  { value: "raw-1m-3m", label: "1M / 3M - Raw Returns", months: [1, 3], rankingMode: "rawAverage" },
+  { value: "raw-3m-6m", label: "3M / 6M - Raw Returns", months: [3, 6], rankingMode: "rawAverage" },
+  { value: "raw-6m-12m", label: "6M / 12M - Raw Returns", months: [6, 12], rankingMode: "rawAverage" },
+] as const;
+
+export type FindingMomentumOption = (typeof findingMomentumOptions)[number];
+export type FindingMomentumOptionValue = FindingMomentumOption["value"];
+
+export function findingMomentumRankingRules(
+  option: FindingMomentumOption,
+): Pick<NseMomentumHistoricalRules, "momentumMonths" | "rankingMode" | "minVolatilityReturnCount"> {
+  return {
+    momentumMonths: option.months,
+    rankingMode: option.rankingMode,
+    minVolatilityReturnCount: nseMomentumHistoricalRules.minVolatilityReturnCount,
+  };
+}
 
 export type FindingMomentumResult = {
   readonly selectedDate: string;
+  readonly selectedOption: FindingMomentumOption;
   readonly latestLocalCompletedTradingDate: string | null;
   readonly latestUpstoxCompletedTradingDate: string | null;
   readonly dataUpdatedThrough: string | null;
@@ -38,52 +64,34 @@ export type FindingMomentumRow = {
   readonly company: string;
   readonly symbol: string;
   readonly close: number;
-  readonly return1M: number;
-  readonly return3M: number;
-  readonly annualizedVolatilityPercent: number;
-  readonly riskAdjusted1M: number;
-  readonly riskAdjusted3M: number;
-  readonly z1M: number;
-  readonly z3M: number;
+  readonly firstReturn: number;
+  readonly secondReturn: number;
+  readonly annualizedVolatilityPercent: number | null;
+  readonly firstRiskAdjusted: number | null;
+  readonly secondRiskAdjusted: number | null;
+  readonly firstZScore: number | null;
+  readonly secondZScore: number | null;
   readonly momentumScore: number;
 };
 
 export async function getFindingMomentum(input: {
   readonly client: PrismaClient;
   readonly selectedDate?: string;
+  readonly option?: FindingMomentumOptionValue;
   readonly now?: Date;
 }): Promise<FindingMomentumResult> {
-  const provider = createUpstoxMarketDataProviderCore({
-    token: process.env.UPSTOX_ANALYTICS_TOKEN,
-  });
-  const localBeforeSync = await latestLocalNsePriceDate(input.client);
-  const freshness = await safeLatestCompletedUpstoxNseTradingDate(input.client, provider, input.now);
-  const sync = freshness.date
-    ? await safeEnsureFreshNseDailyPrices({
-        client: input.client,
-        provider,
-        localDate: localBeforeSync,
-        upstoxDate: freshness.date,
-      })
-    : {
-        checked: true,
-        ran: false,
-        startDate: null,
-        endDate: null,
-        candlesUpserted: 0,
-        skipped: 0,
-        failed: 0,
-        error: freshness.error,
-      };
+  const selectedOption = getFindingMomentumOption(input.option);
   const dataUpdatedThrough = await latestLocalNsePriceDate(input.client);
-  const selectedDate = input.selectedDate ?? dateKey(freshness.date ?? dataUpdatedThrough ?? new Date());
+  const selectedDate = input.selectedDate ?? dateKey(dataUpdatedThrough ?? input.now ?? new Date());
   const rankingDateUsed = await latestLocalTradingDateOnOrBefore(input.client, parseDate(selectedDate));
+  const sync = localOnlySyncStatus();
 
   if (!rankingDateUsed) {
     return {
       selectedDate,
-      latestLocalCompletedTradingDate: nullableDateKey(localBeforeSync),
-      latestUpstoxCompletedTradingDate: nullableDateKey(freshness.date),
+      selectedOption,
+      latestLocalCompletedTradingDate: nullableDateKey(dataUpdatedThrough),
+      latestUpstoxCompletedTradingDate: null,
       dataUpdatedThrough: nullableDateKey(dataUpdatedThrough),
       rankingDateUsed: null,
       sync,
@@ -102,151 +110,35 @@ export async function getFindingMomentum(input: {
     rankingDate: rankingDateUsed,
     candidates,
     prices,
+    rules: findingMomentumRankingRules(selectedOption),
   });
+  const pricesByInstrument = groupPrices(prices);
 
   return {
     selectedDate,
-    latestLocalCompletedTradingDate: nullableDateKey(localBeforeSync),
-    latestUpstoxCompletedTradingDate: nullableDateKey(freshness.date),
+    selectedOption,
+    latestLocalCompletedTradingDate: nullableDateKey(dataUpdatedThrough),
+    latestUpstoxCompletedTradingDate: null,
     dataUpdatedThrough: nullableDateKey(dataUpdatedThrough),
     rankingDateUsed: dateKey(rankingDateUsed),
     sync,
     eligibleUniverseCount: ranked.length,
-    rows: ranked.slice(0, 60).map((candidate) => toFindingMomentumRow(candidate, prices, rankingDateUsed)),
+    rows: ranked.slice(0, 60).map((candidate) =>
+      toFindingMomentumRow(candidate, pricesByInstrument.get(candidate.instrumentId) ?? [], rankingDateUsed, selectedOption)),
   };
 }
 
-async function ensureFreshNseDailyPrices(input: {
-  readonly client: PrismaClient;
-  readonly provider: ReturnType<typeof createUpstoxMarketDataProviderCore>;
-  readonly localDate: Date | null;
-  readonly upstoxDate: Date;
-}): Promise<FindingMomentumResult["sync"]> {
-  if (input.localDate && dateKey(input.localDate) >= dateKey(input.upstoxDate)) {
-    return {
-      checked: true,
-      ran: false,
-      startDate: null,
-      endDate: dateKey(input.upstoxDate),
-      candlesUpserted: 0,
-      skipped: 0,
-      failed: 0,
-      error: null,
-    };
-  }
-
-  const startDate = input.localDate ? addUtcDays(input.localDate, 1) : addUtcMonths(input.upstoxDate, -13);
-  const result = await runUpstoxRealMarketSync({
-    client: input.client,
-    provider: input.provider,
-    mode: "incremental",
-    exchanges: ["NSE"],
-    startDate,
-    endDate: input.upstoxDate,
-    concurrency: 4,
-    progressEvery: 100,
-  });
-
+function localOnlySyncStatus(): FindingMomentumResult["sync"] {
   return {
-    checked: true,
-    ran: true,
-    startDate: dateKey(startDate),
-    endDate: dateKey(input.upstoxDate),
-    candlesUpserted: result.candlesUpserted,
-    skipped: result.skipped,
-    failed: result.failed,
-    error: result.failed > 0 ? `${result.failed} Upstox instrument(s) failed during incremental sync.` : null,
+    checked: false,
+    ran: false,
+    startDate: null,
+    endDate: null,
+    candlesUpserted: 0,
+    skipped: 0,
+    failed: 0,
+    error: null,
   };
-}
-
-async function safeEnsureFreshNseDailyPrices(input: {
-  readonly client: PrismaClient;
-  readonly provider: ReturnType<typeof createUpstoxMarketDataProviderCore>;
-  readonly localDate: Date | null;
-  readonly upstoxDate: Date;
-}): Promise<FindingMomentumResult["sync"]> {
-  try {
-    return await ensureFreshNseDailyPrices(input);
-  } catch (error) {
-    return {
-      checked: true,
-      ran: false,
-      startDate: null,
-      endDate: dateKey(input.upstoxDate),
-      candlesUpserted: 0,
-      skipped: 0,
-      failed: 0,
-      error: error instanceof Error ? error.message : "Could not update NSE daily prices from Upstox.",
-    };
-  }
-}
-
-async function safeLatestCompletedUpstoxNseTradingDate(
-  client: PrismaClient,
-  provider: ReturnType<typeof createUpstoxMarketDataProviderCore>,
-  now = new Date(),
-) {
-  try {
-    return {
-      date: await latestCompletedUpstoxNseTradingDate(client, provider, now),
-      error: null,
-    };
-  } catch (error) {
-    return {
-      date: null,
-      error: error instanceof Error ? error.message : "Could not check latest Upstox completed trading day.",
-    };
-  }
-}
-
-async function latestCompletedUpstoxNseTradingDate(
-  client: PrismaClient,
-  provider: ReturnType<typeof createUpstoxMarketDataProviderCore>,
-  now = new Date(),
-) {
-  const instrumentKey = await representativeNseInstrumentKey(client);
-  if (!instrumentKey) {
-    throw new Error("No active NSE equity instrument exists locally for Upstox freshness checks.");
-  }
-
-  const endDate = latestSafeNseEodProbeDate(now);
-  const startDate = addUtcDays(endDate, -10);
-  const candles = await provider.fetchHistoricalDailyCandles({ instrumentKey, startDate, endDate });
-  const latest = candles
-    .filter((candle) => candle.tradingDate <= endDate)
-    .sort((left, right) => right.tradingDate.getTime() - left.tradingDate.getTime())[0];
-
-  if (!latest) {
-    throw new Error("Upstox did not return a completed NSE daily candle for the recent freshness window.");
-  }
-
-  return latest.tradingDate;
-}
-
-async function representativeNseInstrumentKey(client: PrismaClient) {
-  const reliance = await client.instrument.findFirst({
-    where: {
-      active: true,
-      exchange: "NSE",
-      marketDataSource: realSource,
-      instrumentKey: { startsWith: nseInstrumentKeyPrefix },
-      symbol: "RELIANCE",
-    },
-    select: { instrumentKey: true },
-  });
-  if (reliance) return reliance.instrumentKey;
-
-  const first = await client.instrument.findFirst({
-    where: {
-      active: true,
-      exchange: "NSE",
-      marketDataSource: realSource,
-      instrumentKey: { startsWith: nseInstrumentKeyPrefix },
-    },
-    orderBy: { symbol: "asc" },
-    select: { instrumentKey: true },
-  });
-  return first?.instrumentKey ?? null;
 }
 
 async function latestLocalNsePriceDate(client: PrismaClient) {
@@ -257,7 +149,7 @@ async function latestLocalNsePriceDate(client: PrismaClient) {
         active: true,
         exchange: "NSE",
         marketDataSource: realSource,
-        instrumentKey: { startsWith: nseInstrumentKeyPrefix },
+        instrumentKey: { startsWith: NSE_ORDINARY_EQUITY_INSTRUMENT_KEY_PREFIX },
       },
     },
     orderBy: { tradingDate: "desc" },
@@ -276,7 +168,7 @@ async function latestLocalTradingDateOnOrBefore(client: PrismaClient, selectedDa
         active: true,
         exchange: "NSE",
         marketDataSource: realSource,
-        instrumentKey: { startsWith: nseInstrumentKeyPrefix },
+        instrumentKey: { startsWith: NSE_ORDINARY_EQUITY_INSTRUMENT_KEY_PREFIX },
       },
     },
     orderBy: { tradingDate: "desc" },
@@ -295,7 +187,7 @@ async function loadNseCandidates(client: PrismaClient): Promise<HistoricalRunner
           active: true,
           exchange: "NSE",
           marketDataSource: realSource,
-          instrumentKey: { startsWith: nseInstrumentKeyPrefix },
+          instrumentKey: { startsWith: NSE_ORDINARY_EQUITY_INSTRUMENT_KEY_PREFIX },
         },
       },
     },
@@ -309,9 +201,9 @@ async function loadNseCandidates(client: PrismaClient): Promise<HistoricalRunner
           active: true,
           exchange: "NSE",
           marketDataSource: realSource,
-          instrumentKey: { startsWith: nseInstrumentKeyPrefix },
+          instrumentKey: { startsWith: NSE_ORDINARY_EQUITY_INSTRUMENT_KEY_PREFIX },
         },
-        select: { id: true, symbol: true },
+        select: { id: true, symbol: true, instrumentKey: true },
         take: 1,
       },
     },
@@ -319,7 +211,11 @@ async function loadNseCandidates(client: PrismaClient): Promise<HistoricalRunner
 
   return companies.flatMap((company) => {
     const instrument = company.instruments[0];
-    return instrument
+    return instrument && isEligibleNseOrdinaryEquityInstrument({
+      instrumentKey: instrument.instrumentKey,
+      companyName: company.name,
+      symbol: instrument.symbol,
+    })
       ? [{
           companyId: company.id,
           companyName: company.name,
@@ -371,26 +267,52 @@ async function loadNsePrices(
   return prices;
 }
 
-function toFindingMomentumRow(candidate: NseMomentumRankedCandidate, prices: readonly HistoricalRunnerPrice[], rankingDate: Date): FindingMomentumRow {
+function toFindingMomentumRow(
+  candidate: NseMomentumRankedCandidate,
+  prices: readonly HistoricalRunnerPrice[],
+  rankingDate: Date,
+  option: FindingMomentumOption,
+): FindingMomentumRow {
+  const [firstMonths, secondMonths] = option.months;
+  const firstReturn = requiredMetric(candidate, `return${firstMonths}M`);
+  const secondReturn = requiredMetric(candidate, `return${secondMonths}M`);
+  const isVolatilityAdjusted = option.rankingMode === "volatilityAdjusted";
   const rankingDateKey = dateKey(rankingDate);
   const close = prices
-    .filter((price) => price.instrumentId === candidate.instrumentId && dateKey(price.tradingDate) <= rankingDateKey)
+    .filter((price) => dateKey(price.tradingDate) <= rankingDateKey)
     .sort((left, right) => right.tradingDate.getTime() - left.tradingDate.getTime())[0]?.close ?? 0;
-
   return {
     rank: candidate.rank,
     company: candidate.companyName,
     symbol: candidate.symbol,
     close,
-    return1M: candidate.return1M,
-    return3M: candidate.return3M,
-    annualizedVolatilityPercent: candidate.annualizedVolatility * 100,
-    riskAdjusted1M: candidate.adjusted1M,
-    riskAdjusted3M: candidate.adjusted3M,
-    z1M: candidate.z1M,
-    z3M: candidate.z3M,
+    firstReturn,
+    secondReturn,
+    annualizedVolatilityPercent: isVolatilityAdjusted ? candidate.annualizedVolatility * 100 : null,
+    firstRiskAdjusted: isVolatilityAdjusted ? requiredMetric(candidate, `adjusted${firstMonths}M`) / 100 : null,
+    secondRiskAdjusted: isVolatilityAdjusted ? requiredMetric(candidate, `adjusted${secondMonths}M`) / 100 : null,
+    firstZScore: isVolatilityAdjusted ? requiredMetric(candidate, `z${firstMonths}M`) : null,
+    secondZScore: isVolatilityAdjusted ? requiredMetric(candidate, `z${secondMonths}M`) : null,
     momentumScore: candidate.momentumScore,
   };
+}
+
+function requiredMetric(candidate: NseMomentumRankedCandidate, key: string) {
+  const value = candidate.rankingMetrics?.[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Finding Momentum requires numeric ${key} ranking metrics.`);
+  }
+  return value;
+}
+
+function groupPrices(prices: readonly HistoricalRunnerPrice[]) {
+  const grouped = new Map<string, HistoricalRunnerPrice[]>();
+  for (const price of prices) {
+    const rows = grouped.get(price.instrumentId) ?? [];
+    rows.push(price);
+    grouped.set(price.instrumentId, rows);
+  }
+  return grouped;
 }
 
 export function parseFindingMomentumDate(value: unknown) {
@@ -401,22 +323,19 @@ export function parseFindingMomentumDate(value: unknown) {
   return value;
 }
 
-function parseDate(value: string) {
-  return new Date(`${value}T00:00:00.000Z`);
+export function parseFindingMomentumOption(value: unknown): FindingMomentumOptionValue | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  return findingMomentumOptions.some((option) => option.value === value)
+    ? value as FindingMomentumOptionValue
+    : undefined;
 }
 
-function latestSafeNseEodProbeDate(now: Date) {
-  const istTime = now.getTime() + (5.5 * 60 * 60 * 1000);
-  const ist = new Date(istTime);
-  const istYear = ist.getUTCFullYear();
-  const istMonth = ist.getUTCMonth();
-  const istDate = ist.getUTCDate();
-  const istHour = ist.getUTCHours();
-  const istMinute = ist.getUTCMinutes();
-  const afterDailyCandleWindow = istHour > 18 || (istHour === 18 && istMinute >= 0);
-  const probeDate = new Date(Date.UTC(istYear, istMonth, istDate));
-  if (!afterDailyCandleWindow) probeDate.setUTCDate(probeDate.getUTCDate() - 1);
-  return probeDate;
+function getFindingMomentumOption(value: FindingMomentumOptionValue | undefined): FindingMomentumOption {
+  return findingMomentumOptions.find((option) => option.value === value) ?? findingMomentumOptions[2];
+}
+
+function parseDate(value: string) {
+  return new Date(`${value}T00:00:00.000Z`);
 }
 
 function nullableDateKey(date: Date | null) {
@@ -425,12 +344,6 @@ function nullableDateKey(date: Date | null) {
 
 function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
-}
-
-function addUtcDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
 }
 
 function addUtcMonths(date: Date, months: number) {

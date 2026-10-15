@@ -375,6 +375,7 @@ model HistoricalStrategyRun {
   unavailableFilters       Json
   limitations              Json
   assumptions              Json
+  reportMetrics            Json?
   errorMessage             String?
   startedAt                DateTime                    @default(now())
   completedAt              DateTime?
@@ -436,6 +437,7 @@ model HistoricalStrategyEvent {
 
   @@index([runId, eventDate])
   @@index([runId, eventType])
+  @@index([positionId])
   @@index([companyId])
   @@index([instrumentId])
 }

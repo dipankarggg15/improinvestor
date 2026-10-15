@@ -157,7 +157,8 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
         endDate,
       });
       validateCandles(candles, endDate);
-      candlesUpserted += await upsertDailyPrices(options.client, storedCanonical.id, candles);
+      const insertedCount = await upsertDailyPrices(options.client, storedCanonical.id, candles);
+      candlesUpserted += insertedCount;
       successful += 1;
     } catch (error) {
       failures.push({
@@ -335,7 +336,7 @@ function validateCandles(candles: readonly ProviderDailyCandle[], endDate: Date)
 
 async function upsertDailyPrices(client: PrismaClient, instrumentId: string, candles: readonly ProviderDailyCandle[]) {
   const db = client as unknown as RealMarketPrismaClient;
-  await db.dailyPrice.createMany({
+  const inserted = await db.dailyPrice.createMany({
     data: candles.map((candle) => ({
       instrumentId,
       tradingDate: candle.tradingDate,
@@ -349,7 +350,7 @@ async function upsertDailyPrices(client: PrismaClient, instrumentId: string, can
     skipDuplicates: true,
   });
 
-  return candles.length;
+  return inserted.count;
 }
 
 async function withRetry<T>(operation: () => Promise<T>, attempts = 8) {
@@ -361,9 +362,13 @@ async function withRetry<T>(operation: () => Promise<T>, attempts = 8) {
       lastError = error;
       if (attempt === attempts) break;
       const message = error instanceof Error ? error.message : "";
-      const waitMs = message.includes("rate limit")
+      const defaultWaitMs = message.includes("rate limit")
         ? Math.min(60_000, 10_000 * attempt)
         : 250 * (2 ** (attempt - 1));
+      const retryAfterMs = error instanceof Error && "retryAfterMs" in error &&
+        typeof error.retryAfterMs === "number" && Number.isFinite(error.retryAfterMs)
+        ? error.retryAfterMs : 0;
+      const waitMs = Math.max(defaultWaitMs, retryAfterMs);
       await delay(waitMs);
     }
   }
@@ -490,7 +495,7 @@ type RealMarketPrismaClient = {
   };
   readonly dailyPrice: {
     findFirst(input: unknown): Promise<{ readonly tradingDate: Date } | null>;
-    createMany(input: unknown): Promise<unknown>;
+    createMany(input: unknown): Promise<{ count: number }>;
   };
   readonly dataSync: {
     create(input: unknown): Promise<{ readonly id: string }>;

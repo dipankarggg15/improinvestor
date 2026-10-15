@@ -17,6 +17,7 @@ export async function POST(
   const formData = await request.formData();
   const run = await runEarlySuperstarsHistorical({
     strategyId: id,
+    strategyVersionId: String(formData.get("strategyVersionId") ?? "") || undefined,
     requestedStartDate: parseHistoricalRunDate(formData.get("startDate"), "Start Date"),
     requestedEndDate: parseHistoricalRunDate(formData.get("endDate"), "End Date"),
     client: prisma,

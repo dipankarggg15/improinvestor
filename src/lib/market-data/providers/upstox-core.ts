@@ -113,7 +113,14 @@ async function requestJson<T>(
   }
 
   if (response.status === 429) {
-    throw new Error("Upstox rate limit exceeded.");
+    const retryAfter = response.headers.get("retry-after");
+    const seconds = retryAfter === null ? NaN : Number(retryAfter);
+    const retryAfterMs = Number.isFinite(seconds)
+      ? Math.max(0, seconds * 1000)
+      : retryAfter ? Math.max(0, Date.parse(retryAfter) - Date.now()) : 0;
+    throw Object.assign(new Error("Upstox rate limit exceeded."), {
+      retryAfterMs: Number.isFinite(retryAfterMs) ? retryAfterMs : 0,
+    });
   }
 
   if (!response.ok) {
