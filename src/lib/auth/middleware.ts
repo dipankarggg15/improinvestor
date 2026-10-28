@@ -44,6 +44,40 @@ export async function updateSession(request: NextRequest) {
   return response;
 }
 
+export async function exchangeRecoveryCode(request: NextRequest) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase() ?? "";
+  const code = request.nextUrl.searchParams.get("code");
+  const invalidLinkUrl = new URL("/forgot-password?error=link", request.url);
+
+  if (!supabaseUrl || !supabasePublishableKey || !ownerEmail || !code) {
+    return NextResponse.redirect(invalidLinkUrl);
+  }
+
+  const resetUrl = new URL("/reset-password", request.url);
+  let response = NextResponse.redirect(resetUrl);
+  const supabase = createServerClient(supabaseUrl, supabasePublishableKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+      },
+    },
+  });
+
+  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+  if (error || !isOwnerEmail(data.user?.email, ownerEmail)) {
+    response = NextResponse.redirect(invalidLinkUrl);
+    return response;
+  }
+
+  return response;
+}
+
 function redirectToLogin(request: NextRequest, response: NextResponse) {
   const url = request.nextUrl.clone();
   url.pathname = "/login";

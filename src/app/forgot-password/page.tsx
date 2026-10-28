@@ -64,5 +64,6 @@ export default async function ForgotPasswordPage({ searchParams }: ForgotPasswor
 function recoveryError(error: string) {
   if (error === "config") return "Password recovery is not configured yet.";
   if (error === "link") return "That recovery link is invalid or has expired. Request a new link and try again.";
+  if (error === "rate") return "Too many recovery attempts were made. Wait a few minutes, then try again.";
   return "The recovery email could not be sent. Please try again.";
 }

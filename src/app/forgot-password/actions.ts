@@ -18,11 +18,19 @@ export async function requestPasswordResetAction(formData: FormData) {
   if (isOwnerEmail(email, config.ownerEmail)) {
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${await getPublicOrigin()}/auth/callback?next=/reset-password`,
+      // The project Site URL is already approved by Supabase. Returning to its
+      // root avoids requiring a second callback URL in the redirect allowlist;
+      // middleware exchanges the recovery code before opening reset-password.
+      redirectTo: await getPublicOrigin(),
     });
 
     if (error) {
-      redirect("/forgot-password?error=send");
+      console.error("[password-recovery] Supabase rejected the request", {
+        code: error.code,
+        message: error.message,
+        status: error.status,
+      });
+      redirect(`/forgot-password?error=${error.status === 429 ? "rate" : "send"}`);
     }
   }
 
