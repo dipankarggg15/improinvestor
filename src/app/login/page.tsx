@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 
 import { loginAction } from "@/app/login/actions";
 import { getOwnerSession } from "@/lib/auth/server";
@@ -48,9 +49,19 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               type="password"
             />
           </label>
+          <div className="mt-2 text-right">
+            <Link className="text-sm font-medium text-[var(--accent)] hover:underline" href="/forgot-password">
+              Forgot password?
+            </Link>
+          </div>
           {params.error ? (
             <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
               Unable to sign in. Check your credentials and try again.
+            </p>
+          ) : null}
+          {params.password === "updated" ? (
+            <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              Password updated. Sign in with your new password.
             </p>
           ) : null}
           <button className="mt-5 h-11 w-full rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white" type="submit">

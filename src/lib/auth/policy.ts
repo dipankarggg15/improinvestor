@@ -20,6 +20,13 @@ const protectedRoutes = [
 ] as const;
 
 export function isProtectedPath(pathname: string) {
-  if (pathname === "/login") return false;
+  if (
+    pathname === "/login" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
+    pathname.startsWith("/auth/callback")
+  ) {
+    return false;
+  }
   return protectedRoutes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 }

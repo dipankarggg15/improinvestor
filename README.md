@@ -42,8 +42,14 @@ Required authentication variables:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+NEXT_PUBLIC_SITE_URL="https://improinvestor.vercel.app"
 OWNER_EMAIL=
 ```
+
+Password recovery is available from the sign-in page. In Supabase, add
+`https://improinvestor.vercel.app/auth/callback` to **Authentication → URL Configuration → Redirect URLs**
+(replace the hostname if the deployment URL changes). Recovery requests are accepted only for `OWNER_EMAIL`,
+and a new password can be saved only from an authenticated recovery session.
 
 Real-market ingestion uses:
 

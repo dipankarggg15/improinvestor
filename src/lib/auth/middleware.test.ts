@@ -17,7 +17,10 @@ describe("isProtectedPath", () => {
     expect(isProtectedPath("/research/counterfactuals")).toBe(true);
   });
 
-  it("leaves the login route public", () => {
+  it("leaves authentication and recovery routes public", () => {
     expect(isProtectedPath("/login")).toBe(false);
+    expect(isProtectedPath("/forgot-password")).toBe(false);
+    expect(isProtectedPath("/reset-password")).toBe(false);
+    expect(isProtectedPath("/auth/callback")).toBe(false);
   });
 });
