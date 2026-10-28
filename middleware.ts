@@ -1,13 +1,9 @@
 import type { NextRequest } from "next/server";
 
-import { exchangeRecoveryCode, updateSession } from "@/lib/auth/middleware";
+import { updateSession } from "@/lib/auth/middleware";
 import { isProtectedPath } from "@/lib/auth/policy";
 
 export async function middleware(request: NextRequest) {
-  if (request.nextUrl.pathname === "/" && request.nextUrl.searchParams.has("code")) {
-    return exchangeRecoveryCode(request);
-  }
-
   if (!isProtectedPath(request.nextUrl.pathname)) {
     return;
   }
