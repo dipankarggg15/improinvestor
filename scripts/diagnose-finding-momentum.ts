@@ -132,7 +132,7 @@ async function main() {
       selectedDate: finding.selectedDate,
       rankingDateUsed: finding.rankingDateUsed,
       dataUpdatedThrough: finding.dataUpdatedThrough,
-      freshnessError: finding.sync.error,
+      freshnessError: null,
     },
     universe,
     backtestInitialTop20Symbols: backtest.positions

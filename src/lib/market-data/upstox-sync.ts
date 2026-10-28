@@ -61,7 +61,9 @@ export function canonicalizeUpstoxEquities(instruments: readonly ProviderInstrum
   for (const instrument of instruments) {
     if (!instrument.isin || !instrument.active) continue;
     if (instrument.segment !== "NSE_EQ" && instrument.segment !== "BSE_EQ") continue;
-    byIsin.set(instrument.isin, [...(byIsin.get(instrument.isin) ?? []), instrument]);
+    const companyInstruments = byIsin.get(instrument.isin);
+    if (companyInstruments) companyInstruments.push(instrument);
+    else byIsin.set(instrument.isin, [instrument]);
   }
 
   return [...byIsin.entries()]
@@ -169,7 +171,18 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
     } finally {
       processed += 1;
       if (processed % progressEvery === 0 || processed === syncTargets.length) {
-        await updateSyncProgress(options.client, syncJob.id, { processed, successful, skipped, failures, candlesUpserted });
+        await updateSyncProgress(options.client, syncJob.id, {
+          processed,
+          successful,
+          skipped,
+          failures,
+          candlesUpserted,
+          mode: options.mode,
+          totalCompanies: companies.length,
+          totalInstruments: syncTargets.length,
+          endDate,
+          startedAt,
+        });
       }
     }
   });
@@ -275,24 +288,47 @@ async function upsertCompanyAndInstruments(client: PrismaClient, company: Canoni
   const stored: StoredInstrument[] = [];
 
   for (const instrument of company.instruments) {
-    const row = await db.instrument.upsert({
-      where: { exchange_instrumentKey: { exchange: instrument.exchange, instrumentKey: instrument.instrumentKey } },
-      update: {
-        companyId: storedCompany.id,
-        symbol: instrument.symbol,
-        active: instrument.active,
-        marketDataSource: realSource,
-      },
-      create: {
-        companyId: storedCompany.id,
-        exchange: instrument.exchange,
-        symbol: instrument.symbol,
-        instrumentKey: instrument.instrumentKey,
-        active: instrument.active,
-        marketDataSource: realSource,
-      },
+    const existingByKey = await db.instrument.findFirst({
+      where: { exchange: instrument.exchange, instrumentKey: instrument.instrumentKey },
       select: { id: true, instrumentKey: true },
     });
+    const existingBySymbol = await db.instrument.findFirst({
+      where: { exchange: instrument.exchange, symbol: instrument.symbol },
+      select: { id: true, instrumentKey: true },
+    });
+    if (existingByKey && existingBySymbol && existingByKey.id !== existingBySymbol.id) {
+      await db.instrument.update({
+        where: { id: existingByKey.id },
+        data: {
+          symbol: `__SUPERSEDED__${existingByKey.id}`,
+          instrumentKey: `__SUPERSEDED__${existingByKey.id}`,
+          active: false,
+          marketDataSource: realSource,
+        },
+        select: { id: true, instrumentKey: true },
+      });
+    }
+    const existing = existingBySymbol ?? existingByKey;
+    const data = {
+      companyId: storedCompany.id,
+      symbol: instrument.symbol,
+      instrumentKey: instrument.instrumentKey,
+      active: instrument.active,
+      marketDataSource: realSource,
+    };
+    const row = existing
+      ? await db.instrument.update({
+        where: { id: existing.id },
+        data,
+        select: { id: true, instrumentKey: true },
+      })
+      : await db.instrument.create({
+        data: {
+          ...data,
+          exchange: instrument.exchange,
+        },
+        select: { id: true, instrumentKey: true },
+      });
     stored.push(row);
   }
 
@@ -442,6 +478,11 @@ async function updateSyncProgress(
     readonly skipped: number;
     readonly failures: UpstoxSyncResult["failures"];
     readonly candlesUpserted: number;
+    readonly mode: UpstoxSyncMode;
+    readonly totalCompanies: number;
+    readonly totalInstruments: number;
+    readonly endDate: Date;
+    readonly startedAt: Date;
   },
 ) {
   const db = client as unknown as RealMarketPrismaClient;
@@ -454,6 +495,11 @@ async function updateSyncProgress(
       recordsSkipped: progress.skipped,
       metadata: {
         marketDataSource: realSource,
+        mode: progress.mode,
+        totalCompanies: progress.totalCompanies,
+        totalInstruments: progress.totalInstruments,
+        completedEodThrough: progress.endDate.toISOString().slice(0, 10),
+        startedAt: progress.startedAt.toISOString(),
         candlesUpserted: progress.candlesUpserted,
         failures: progress.failures.slice(-25),
       },
@@ -491,7 +537,9 @@ type RealMarketPrismaClient = {
     upsert(input: unknown): Promise<{ readonly id: string }>;
   };
   readonly instrument: {
-    upsert(input: unknown): Promise<StoredInstrument>;
+    findFirst(input: unknown): Promise<StoredInstrument | null>;
+    update(input: unknown): Promise<StoredInstrument>;
+    create(input: unknown): Promise<StoredInstrument>;
   };
   readonly dailyPrice: {
     findFirst(input: unknown): Promise<{ readonly tradingDate: Date } | null>;

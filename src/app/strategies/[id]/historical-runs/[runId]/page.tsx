@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { prisma } from "@/lib/db/prisma";
 import {
   completeEarlySuperstarsHistoricalRun,
@@ -13,6 +15,7 @@ import {
   isParentNseMomentumHistoricalStrategy,
 } from "@/lib/strategies/historical-run-service";
 import { formatCurrency, formatDate, formatPercent, formatQuantity } from "@/lib/ui/format";
+import { strategyVersionDisplayName } from "@/lib/strategies/version-presentation";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +31,7 @@ export default async function HistoricalStrategyRunPage({
   if (!run) notFound();
 
   const isParentNseMomentumRun = isParentNseMomentumHistoricalStrategy(run.strategy.name, run.strategyVersion.config);
-  const events = isParentNseMomentumRun ? run.events : run.events.slice(0, 500);
+  const events = run.events;
   const entryMomentumLabel = isEarlySuperstarsHistoricalStrategy(run.strategy.name)
     ? entryMomentumLabelForEarlySuperstarsVariant(run.strategy.name, run.strategyVersion.config)
     : isMomentum10HistoricalStrategy(run.strategy.name)
@@ -55,7 +58,11 @@ export default async function HistoricalStrategyRunPage({
           <p className="mt-3 text-sm font-medium text-[var(--accent)]">REAL MARKET DATA</p>
           <h1 className="mt-2 text-3xl font-semibold">Automated Historical Run</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--muted)]">
-            V{run.strategyVersion.versionNumber} {run.strategyVersion.label ? `(${run.strategyVersion.label})` : ""}, requested {formatDate(run.requestedStartDate)} to {formatDate(run.requestedEndDate)}.
+            {strategyVersionDisplayName({
+              strategyName: run.strategy.name,
+              versionNumber: run.strategyVersion.versionNumber,
+              storedLabel: run.strategyVersion.label,
+            })}, requested {formatDate(run.requestedStartDate)} to {formatDate(run.requestedEndDate)}.
             Effective simulation window {run.effectiveStartDate ? formatDate(run.effectiveStartDate) : "-"} to {run.effectiveEndDate ? formatDate(run.effectiveEndDate) : "-"}.
           </p>
         </div>
@@ -166,8 +173,8 @@ export default async function HistoricalStrategyRunPage({
                 {run.positions.map((position) => (
                   <tr className="border-t border-[var(--border)] align-top" key={position.id}>
                     <td className="py-3 pr-3">
-                      <span className="block font-medium">{position.company.name}</span>
-                      <span className="text-xs text-[var(--muted)]">{position.instrument.exchange}:{position.instrument.symbol}</span>
+                      <StockChartLink className="block font-medium text-[var(--accent)] hover:underline" date={formatDate(position.entryDate)} exchange={position.instrument.exchange} symbol={position.instrument.symbol}>{position.company.name}</StockChartLink>
+                      <span className="text-xs text-[var(--muted)]">{position.instrument.exchange}:{position.instrument.symbol} · </span><SectorStatus className="text-xs text-[var(--muted)]" date={formatDate(position.entryDate)} sector={position.company.sector} />
                     </td>
                     <td className="py-3 pr-3">
                       <span className="block">{formatDate(position.entryDate)}</span>
@@ -231,7 +238,7 @@ export default async function HistoricalStrategyRunPage({
                 ))}
               </tbody>
             </table>
-            {run.events.length > events.length ? <p className="mt-3 text-sm text-[var(--muted)]">Showing first {events.length} events.</p> : null}
+            {run._count.events > events.length ? <p className="mt-3 text-sm text-[var(--muted)]">Showing first {events.length} of {run._count.events.toLocaleString("en-IN")} events.</p> : null}
           </div>
         </details>
 
@@ -330,7 +337,7 @@ function AssumptionStatusGrid({ assumptions }: { readonly assumptions: string[] 
     ["Trading Costs", "Not Included"],
     ["Taxes", "Not Included"],
     ["Circuit Handling", circuitEnabled ? "Enabled" : "Disabled"],
-    ["Execution Price", "Close"],
+    ["Execution Price", assumptions.some((value) => value.includes("next available session open")) ? "Next Session Open" : "Close"],
   ];
   return (
     <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">

@@ -13,9 +13,16 @@ export type HistoricalFilterSortKey =
   | "oneWeekReturn"
   | "oneMonthReturn"
   | "threeMonthReturn"
+  | "momentumScore"
   | "averageTradedValue";
 
 export type HistoricalSortDirection = "asc" | "desc";
+
+export type HistoricalMomentumRankingOption =
+  | "volatilityZScore1M3M"
+  | "volatilityZScore6M12M"
+  | "raw1M3M"
+  | "raw6M12M";
 
 export type HistoricalFilterInput = {
   readonly startDate: Date;
@@ -23,6 +30,7 @@ export type HistoricalFilterInput = {
   readonly minAverageTradedValue: number;
   readonly minReturnPercent?: number | null;
   readonly maxReturnPercent?: number | null;
+  readonly rankingOption: HistoricalMomentumRankingOption;
   readonly sortBy: HistoricalFilterSortKey;
   readonly sortDirection: HistoricalSortDirection;
 };
@@ -31,6 +39,7 @@ export type HistoricalFilterRow = {
   readonly rank: number;
   readonly companyId: string;
   readonly companyName: string;
+  readonly sector?: string | null;
   readonly isin: string;
   readonly instrumentId: string;
   readonly symbol: string;
@@ -46,10 +55,15 @@ export type HistoricalFilterRow = {
   readonly oneWeekReturnPercent: number | null;
   readonly oneMonthReturnPercent: number | null;
   readonly threeMonthReturnPercent: number | null;
+  readonly firstMomentumReturnPercent: number;
+  readonly secondMomentumReturnPercent: number;
+  readonly annualizedVolatilityPercent: number | null;
+  readonly momentumScore: number;
   readonly averageTradedValue: number;
 };
 
 export type HistoricalFilterResult = {
+  readonly rankingOption: HistoricalMomentumRankingOption;
   readonly rows: HistoricalFilterRow[];
   readonly excluded: {
     readonly missingPrices: number;
@@ -67,6 +81,7 @@ export type HistoricalReturnInput = {
 export type HistoricalReturnRow = {
   readonly companyId: string;
   readonly companyName: string;
+  readonly sector?: string | null;
   readonly isin: string;
   readonly instrumentId: string;
   readonly symbol: string;
@@ -137,6 +152,7 @@ export type SavedReturnExperimentSummary = {
 type Candidate = {
   readonly companyId: string;
   readonly companyName: string;
+  readonly sector: string | null;
   readonly isin: string;
   readonly instrumentId: string;
   readonly symbol: string;
@@ -153,6 +169,7 @@ type PricePoint = {
 type RawFilterRow = {
   readonly companyId: string;
   readonly companyName: string;
+  readonly sector: string | null;
   readonly isin: string;
   readonly instrumentId: string;
   readonly symbol: string;
@@ -164,14 +181,31 @@ type RawFilterRow = {
   readonly oneWeekStartClose: unknown;
   readonly oneMonthStartClose: unknown;
   readonly threeMonthStartClose: unknown;
+  readonly sixMonthStartClose: unknown;
+  readonly twelveMonthStartClose: unknown;
+  readonly annualizedVolatility: unknown;
+  readonly volatilityReturnCount: unknown;
   readonly averageTradedValue: unknown;
+};
+
+type MomentumFilterMetricRow = Omit<HistoricalFilterRow, "rank" | "momentumScore"> & {
+  readonly firstAdjustedMomentum: number;
+  readonly secondAdjustedMomentum: number;
+};
+
+type MomentumMetrics = Pick<
+  HistoricalFilterRow,
+  "firstMomentumReturnPercent" | "secondMomentumReturnPercent" | "annualizedVolatilityPercent"
+> & {
+  readonly firstAdjustedMomentum: number;
+  readonly secondAdjustedMomentum: number;
 };
 
 const returnExperimentInclude = {
   positions: {
     orderBy: [{ createdAt: "asc" as const }],
     include: {
-      company: { select: { id: true, name: true, isin: true } },
+      company: { select: { id: true, name: true, isin: true, sector: true } },
       instrument: { select: { id: true, exchange: true, symbol: true } },
     },
   },
@@ -179,6 +213,16 @@ const returnExperimentInclude = {
 
 export class HistoricalExperimentRepository {
   constructor(private readonly client?: PrismaClient) {}
+
+  async getLatestRealMarketDate(): Promise<string | null> {
+    const client = await this.getClient();
+    const result = await client.dailyPrice.aggregate({
+      where: { marketDataSource: realSource },
+      _max: { tradingDate: true },
+    });
+
+    return result._max.tradingDate ? formatDate(result._max.tradingDate) : null;
+  }
 
   async runFilter(input: HistoricalFilterInput): Promise<HistoricalFilterResult> {
     assertDateOrder(input.startDate, input.endDate);
@@ -194,10 +238,11 @@ export class HistoricalExperimentRepository {
       addUtcDays(input.endDate, -9),
       addUtcMonths(input.endDate, -1),
       addUtcMonths(input.endDate, -3),
+      addUtcMonths(input.endDate, -12),
     );
     const prices = await this.loadPrices(candidates.map((candidate) => candidate.instrumentId), earliestDate, input.endDate);
     const pricesByInstrument = groupPrices(prices);
-    const rows: Omit<HistoricalFilterRow, "rank">[] = [];
+    const rows: MomentumFilterMetricRow[] = [];
     const excluded = { missingPrices: 0, liquidity: 0, returnFilter: 0 };
 
     for (const candidate of candidates) {
@@ -225,6 +270,12 @@ export class HistoricalExperimentRepository {
         continue;
       }
 
+      const momentum = calculateMomentumMetrics(points, input.endDate, input.rankingOption);
+      if (!momentum) {
+        excluded.missingPrices += 1;
+        continue;
+      }
+
       rows.push({
         ...candidate,
         startPrice: start.close,
@@ -238,12 +289,16 @@ export class HistoricalExperimentRepository {
         oneWeekReturnPercent: calculateWindowReturn(points, addUtcDays(input.endDate, -9), input.endDate),
         oneMonthReturnPercent: calculateWindowReturn(points, addUtcMonths(input.endDate, -1), input.endDate),
         threeMonthReturnPercent: calculateWindowReturn(points, addUtcMonths(input.endDate, -3), input.endDate),
+        ...momentum,
         averageTradedValue,
       });
     }
 
+    const rankedRows = scoreMomentumRows(rows, input.rankingOption);
+
     return {
-      rows: sortFilterRows(rows, input.sortBy, input.sortDirection).map((row, index) => ({ ...row, rank: index + 1 })),
+      rankingOption: input.rankingOption,
+      rows: sortFilterRows(rankedRows, input.sortBy, input.sortDirection),
       excluded,
     };
   }
@@ -273,6 +328,7 @@ export class HistoricalExperimentRepository {
       return {
         companyId: candidate?.companyId ?? "",
         companyName: candidate?.companyName ?? "Unknown stock",
+        sector: candidate?.sector ?? null,
         isin: candidate?.isin ?? "",
         instrumentId,
         symbol: candidate?.symbol ?? "",
@@ -349,6 +405,9 @@ export class HistoricalExperimentRepository {
       throw new Error("Selected stock is not available in UPSTOX_REAL market data.");
     }
     assertDateOrder(input.requestedStartDate, input.requestedEndDate);
+    if (existing.positions.some((position) => position.instrumentId === input.instrumentId)) {
+      return existing;
+    }
 
     await client.returnExperimentPosition.create({
       data: {
@@ -392,12 +451,13 @@ export class HistoricalExperimentRepository {
   async calculateAndPersistTemporaryExperiment(input: {
     readonly positions: readonly ManualReturnPositionInput[];
   }): Promise<ReturnExperimentView> {
-    if (input.positions.length === 0) {
+    const uniquePositions = [...new Map(input.positions.map((position) => [position.instrumentId, position])).values()];
+    if (uniquePositions.length === 0) {
       throw new Error("Add at least one position before calculating.");
     }
 
     const client = await this.getClient();
-    const calculated = await this.calculatePositionInputs(input.positions);
+    const calculated = await this.calculatePositionInputs(uniquePositions);
     const now = new Date();
     const result = await client.$transaction(async (tx) => {
       let experiment = await tx.returnExperiment.findFirst({
@@ -499,6 +559,7 @@ export class HistoricalExperimentRepository {
         id: true,
         name: true,
         isin: true,
+        sector: true,
         instruments: {
           where: { active: true, marketDataSource: realSource },
           select: { id: true, exchange: true, symbol: true },
@@ -516,6 +577,7 @@ export class HistoricalExperimentRepository {
           ? {
               companyId: company.id,
               companyName: company.name,
+              sector: company.sector,
               isin: company.isin,
               instrumentId: instrument.id,
               symbol: instrument.symbol,
@@ -530,12 +592,15 @@ export class HistoricalExperimentRepository {
     const oneWeekStartDate = addUtcDays(input.endDate, -9);
     const oneMonthStartDate = addUtcMonths(input.endDate, -1);
     const threeMonthStartDate = addUtcMonths(input.endDate, -3);
-    const earliestDate = minDate(input.startDate, oneWeekStartDate, oneMonthStartDate, threeMonthStartDate);
+    const sixMonthStartDate = addUtcMonths(input.endDate, -6);
+    const twelveMonthStartDate = addUtcMonths(input.endDate, -12);
+    const earliestDate = minDate(input.startDate, oneWeekStartDate, oneMonthStartDate, threeMonthStartDate, addUtcDays(twelveMonthStartDate, -9));
     const rows = await client.$queryRaw<RawFilterRow[]>`
       with canonical as (
         select distinct on (c.id)
                c.id as "companyId",
                c.name as "companyName",
+               c.sector,
                c.isin,
                i.id as "instrumentId",
                i.symbol,
@@ -548,36 +613,52 @@ export class HistoricalExperimentRepository {
         order by c.id,
                  case when i.exchange = 'NSE' then 0 else 1 end,
                  i.symbol
+      ), price_points as (
+        select c.*,
+               dp."tradingDate",
+               dp.close,
+               dp.volume,
+               lag(dp."tradingDate") over (partition by c."instrumentId" order by dp."tradingDate") as "previousTradingDate",
+               lag(dp.close) over (partition by c."instrumentId" order by dp."tradingDate") as "previousClose"
+        from canonical c
+        left join "DailyPrice" dp
+          on dp."instrumentId" = c."instrumentId"
+         and dp."marketDataSource" = 'UPSTOX_REAL'
+         and dp."tradingDate" >= ${earliestDate}
+         and dp."tradingDate" <= ${input.endDate}
       )
-      select c."companyId",
-             c."companyName",
-             c.isin,
-             c."instrumentId",
-             c.symbol,
-             c.exchange,
-             (array_agg(dp."tradingDate" order by dp."tradingDate" asc)
-               filter (where dp."tradingDate" >= ${input.startDate}))[1] as "startDate",
-             (array_agg(dp.close order by dp."tradingDate" asc)
-               filter (where dp."tradingDate" >= ${input.startDate}))[1] as "startClose",
-             (array_agg(dp."tradingDate" order by dp."tradingDate" desc))[1] as "endDate",
-             (array_agg(dp.close order by dp."tradingDate" desc))[1] as "endClose",
-             (array_agg(dp.close order by dp."tradingDate" asc)
-               filter (where dp."tradingDate" >= ${oneWeekStartDate}))[1] as "oneWeekStartClose",
-             (array_agg(dp.close order by dp."tradingDate" asc)
-               filter (where dp."tradingDate" >= ${oneMonthStartDate}))[1] as "oneMonthStartClose",
-             (array_agg(dp.close order by dp."tradingDate" asc)
-               filter (where dp."tradingDate" >= ${threeMonthStartDate}))[1] as "threeMonthStartClose",
-             avg(dp.close * dp.volume::numeric)
-               filter (where dp."tradingDate" >= ${input.startDate}) as "averageTradedValue"
-      from canonical c
-      left join "DailyPrice" dp
-        on dp."instrumentId" = c."instrumentId"
-       and dp."marketDataSource" = 'UPSTOX_REAL'
-       and dp."tradingDate" >= ${earliestDate}
-       and dp."tradingDate" <= ${input.endDate}
-      group by c."companyId", c."companyName", c.isin, c."instrumentId", c.symbol, c.exchange
+      select p."companyId",
+             p."companyName",
+             p.sector,
+             p.isin,
+             p."instrumentId",
+             p.symbol,
+             p.exchange,
+             (array_agg(p."tradingDate" order by p."tradingDate" asc)
+               filter (where p."tradingDate" >= ${input.startDate}))[1] as "startDate",
+             (array_agg(p.close order by p."tradingDate" asc)
+               filter (where p."tradingDate" >= ${input.startDate}))[1] as "startClose",
+             (array_agg(p."tradingDate" order by p."tradingDate" desc))[1] as "endDate",
+             (array_agg(p.close order by p."tradingDate" desc))[1] as "endClose",
+             (array_agg(p.close order by p."tradingDate" asc)
+               filter (where p."tradingDate" >= ${oneWeekStartDate}))[1] as "oneWeekStartClose",
+             (array_agg(p.close order by p."tradingDate" asc)
+               filter (where p."tradingDate" >= ${oneMonthStartDate}))[1] as "oneMonthStartClose",
+             (array_agg(p.close order by p."tradingDate" asc)
+               filter (where p."tradingDate" >= ${threeMonthStartDate}))[1] as "threeMonthStartClose",
+             (array_agg(p.close order by p."tradingDate" asc)
+               filter (where p."tradingDate" >= ${sixMonthStartDate}))[1] as "sixMonthStartClose",
+             (array_agg(p.close order by p."tradingDate" asc)
+               filter (where p."tradingDate" >= ${twelveMonthStartDate}))[1] as "twelveMonthStartClose",
+             stddev_pop((p.close / nullif(p."previousClose", 0) - 1)::numeric)
+               filter (where p."tradingDate" >= ${twelveMonthStartDate} and p."previousTradingDate" >= ${twelveMonthStartDate} and p."previousClose" > 0) * sqrt(252) as "annualizedVolatility",
+             count(*) filter (where p."tradingDate" >= ${twelveMonthStartDate} and p."previousTradingDate" >= ${twelveMonthStartDate} and p."previousClose" > 0) as "volatilityReturnCount",
+             avg(p.close * p.volume::numeric)
+               filter (where p."tradingDate" >= ${input.startDate}) as "averageTradedValue"
+      from price_points p
+      group by p."companyId", p."companyName", p.sector, p.isin, p."instrumentId", p.symbol, p.exchange
     `;
-    const resultRows: Omit<HistoricalFilterRow, "rank">[] = [];
+    const resultRows: MomentumFilterMetricRow[] = [];
     const excluded = { missingPrices: 0, liquidity: 0, returnFilter: 0 };
 
     for (const row of rows) {
@@ -604,9 +685,16 @@ export class HistoricalExperimentRepository {
         continue;
       }
 
+      const momentum = momentumMetricsFromSqlRow(row, input.rankingOption);
+      if (!momentum) {
+        excluded.missingPrices += 1;
+        continue;
+      }
+
       resultRows.push({
         companyId: row.companyId,
         companyName: row.companyName,
+        sector: row.sector,
         isin: row.isin,
         instrumentId: row.instrumentId,
         symbol: row.symbol,
@@ -622,12 +710,16 @@ export class HistoricalExperimentRepository {
         oneWeekReturnPercent: returnFromNullable(row.oneWeekStartClose, row.endClose),
         oneMonthReturnPercent: returnFromNullable(row.oneMonthStartClose, row.endClose),
         threeMonthReturnPercent: returnFromNullable(row.threeMonthStartClose, row.endClose),
+        ...momentum,
         averageTradedValue,
       });
     }
 
+    const rankedRows = scoreMomentumRows(resultRows, input.rankingOption);
+
     return {
-      rows: sortFilterRows(resultRows, input.sortBy, input.sortDirection).map((row, index) => ({ ...row, rank: index + 1 })),
+      rankingOption: input.rankingOption,
+      rows: sortFilterRows(rankedRows, input.sortBy, input.sortDirection),
       excluded,
     };
   }
@@ -640,13 +732,14 @@ export class HistoricalExperimentRepository {
         id: true,
         exchange: true,
         symbol: true,
-        company: { select: { id: true, name: true, isin: true } },
+        company: { select: { id: true, name: true, isin: true, sector: true } },
       },
     });
 
     return instruments.map((instrument) => ({
       companyId: instrument.company.id,
       companyName: instrument.company.name,
+      sector: instrument.company.sector,
       isin: instrument.company.isin,
       instrumentId: instrument.id,
       symbol: instrument.symbol,
@@ -689,6 +782,7 @@ export class HistoricalExperimentRepository {
         id: position.id ?? pendingId(),
         companyId: candidate?.companyId ?? position.companyId,
         companyName: candidate?.companyName ?? "Unknown stock",
+        sector: candidate?.sector ?? null,
         isin: candidate?.isin ?? "",
         instrumentId: position.instrumentId,
         symbol: candidate?.symbol ?? "",
@@ -764,11 +858,24 @@ export function parseFilterSortKey(value: unknown): HistoricalFilterSortKey {
     "oneWeekReturn",
     "oneMonthReturn",
     "threeMonthReturn",
+    "momentumScore",
     "averageTradedValue",
   ]);
   return typeof value === "string" && allowed.has(value as HistoricalFilterSortKey)
     ? value as HistoricalFilterSortKey
-    : "return";
+    : "momentumScore";
+}
+
+export function parseMomentumRankingOption(value: unknown): HistoricalMomentumRankingOption {
+  const allowed = new Set<HistoricalMomentumRankingOption>([
+    "volatilityZScore1M3M",
+    "volatilityZScore6M12M",
+    "raw1M3M",
+    "raw6M12M",
+  ]);
+  return typeof value === "string" && allowed.has(value as HistoricalMomentumRankingOption)
+    ? value as HistoricalMomentumRankingOption
+    : "volatilityZScore1M3M";
 }
 
 export function parseSortDirection(value: unknown): HistoricalSortDirection {
@@ -860,6 +967,112 @@ function calculateWindowReturn(points: readonly PricePoint[], startDate: Date, e
     : null;
 }
 
+function calculateMomentumMetrics(
+  points: readonly PricePoint[],
+  endDate: Date,
+  rankingOption: HistoricalMomentumRankingOption,
+): MomentumMetrics | null {
+  const [firstMonths, secondMonths] = momentumMonthsForOption(rankingOption);
+  const firstReturn = calculateWindowReturn(points, addUtcMonths(endDate, -firstMonths), endDate);
+  const secondReturn = calculateWindowReturn(points, addUtcMonths(endDate, -secondMonths), endDate);
+  if (firstReturn === null || secondReturn === null) return null;
+
+  const volatilityAdjusted = isVolatilityRanking(rankingOption);
+  const annualizedVolatility = volatilityAdjusted
+    ? calculateAnnualizedVolatility(points, addUtcMonths(endDate, -12), endDate)
+    : null;
+  if (volatilityAdjusted && (annualizedVolatility === null || annualizedVolatility <= 0)) return null;
+
+  return {
+    firstMomentumReturnPercent: firstReturn,
+    secondMomentumReturnPercent: secondReturn,
+    annualizedVolatilityPercent: annualizedVolatility,
+    firstAdjustedMomentum: volatilityAdjusted ? firstReturn / annualizedVolatility! : firstReturn,
+    secondAdjustedMomentum: volatilityAdjusted ? secondReturn / annualizedVolatility! : secondReturn,
+  };
+}
+
+function momentumMetricsFromSqlRow(
+  row: RawFilterRow,
+  rankingOption: HistoricalMomentumRankingOption,
+): MomentumMetrics | null {
+  const endClose = numberValue(row.endClose);
+  const [firstStart, secondStart] = rankingOption.endsWith("1M3M")
+    ? [row.oneMonthStartClose, row.threeMonthStartClose]
+    : [row.sixMonthStartClose, row.twelveMonthStartClose];
+  const firstReturn = returnFromNullable(firstStart, endClose);
+  const secondReturn = returnFromNullable(secondStart, endClose);
+  if (firstReturn === null || secondReturn === null) return null;
+
+  const volatilityAdjusted = isVolatilityRanking(rankingOption);
+  const annualizedVolatility = numberValue(row.annualizedVolatility);
+  const volatilityReturnCount = numberValue(row.volatilityReturnCount) ?? 0;
+  if (volatilityAdjusted && (annualizedVolatility === null || annualizedVolatility <= 0 || volatilityReturnCount < 200)) {
+    return null;
+  }
+
+  return {
+    firstMomentumReturnPercent: firstReturn,
+    secondMomentumReturnPercent: secondReturn,
+    annualizedVolatilityPercent: volatilityAdjusted ? annualizedVolatility : null,
+    firstAdjustedMomentum: volatilityAdjusted ? firstReturn / annualizedVolatility! : firstReturn,
+    secondAdjustedMomentum: volatilityAdjusted ? secondReturn / annualizedVolatility! : secondReturn,
+  };
+}
+
+function scoreMomentumRows(
+  rows: readonly MomentumFilterMetricRow[],
+  rankingOption: HistoricalMomentumRankingOption,
+): HistoricalFilterRow[] {
+  const volatilityAdjusted = isVolatilityRanking(rankingOption);
+  const firstStats = volatilityAdjusted ? meanAndStdDev(rows.map((row) => row.firstAdjustedMomentum)) : null;
+  const secondStats = volatilityAdjusted ? meanAndStdDev(rows.map((row) => row.secondAdjustedMomentum)) : null;
+  if (volatilityAdjusted && (!firstStats || !secondStats || firstStats.stdDev === 0 || secondStats.stdDev === 0)) return [];
+
+  return rows
+    .map(({ firstAdjustedMomentum, secondAdjustedMomentum, ...row }) => ({
+      ...row,
+      rank: 0,
+      momentumScore: volatilityAdjusted
+        ? (
+            (firstAdjustedMomentum - firstStats!.mean) / firstStats!.stdDev +
+            (secondAdjustedMomentum - secondStats!.mean) / secondStats!.stdDev
+          ) / 2
+        : (row.firstMomentumReturnPercent + row.secondMomentumReturnPercent) / 2,
+    }))
+    .sort((left, right) => right.momentumScore - left.momentumScore || left.symbol.localeCompare(right.symbol))
+    .map((row, index) => ({ ...row, rank: index + 1 }));
+}
+
+function momentumMonthsForOption(rankingOption: HistoricalMomentumRankingOption): readonly [number, number] {
+  return rankingOption.endsWith("1M3M") ? [1, 3] : [6, 12];
+}
+
+function isVolatilityRanking(rankingOption: HistoricalMomentumRankingOption) {
+  return rankingOption.startsWith("volatilityZScore");
+}
+
+function calculateAnnualizedVolatility(points: readonly PricePoint[], startDate: Date, endDate: Date) {
+  const period = points.filter((point) => point.tradingDate >= startDate && point.tradingDate <= endDate && point.close > 0);
+  if (period.length < 201) return null;
+  const returns: number[] = [];
+  for (let index = 1; index < period.length; index += 1) {
+    const previous = period[index - 1];
+    const current = period[index];
+    if (previous && current && previous.close > 0) returns.push((current.close / previous.close) - 1);
+  }
+  if (returns.length < 200) return null;
+  const stats = meanAndStdDev(returns);
+  return stats ? stats.stdDev * Math.sqrt(252) : null;
+}
+
+function meanAndStdDev(values: readonly number[]) {
+  if (values.length < 2) return null;
+  const mean = values.reduce((total, value) => total + value, 0) / values.length;
+  const variance = values.reduce((total, value) => total + ((value - mean) ** 2), 0) / values.length;
+  return { mean, stdDev: Math.sqrt(variance) };
+}
+
 function calculateReturnPercent(startClose: number, endClose: number) {
   return ((endClose / startClose) - 1) * 100;
 }
@@ -874,6 +1087,10 @@ function returnFromNullable(startCloseInput: unknown, endCloseInput: unknown) {
 
 function numberValue(input: unknown) {
   if (typeof input === "number" && Number.isFinite(input)) return input;
+  if (typeof input === "bigint") {
+    const value = Number(input);
+    return Number.isFinite(value) ? value : null;
+  }
   if (typeof input === "string" && Number.isFinite(Number(input))) return Number(input);
   if (input && typeof input === "object" && "toNumber" in input && typeof input.toNumber === "function") {
     const value = input.toNumber() as unknown;
@@ -883,7 +1100,7 @@ function numberValue(input: unknown) {
 }
 
 function sortFilterRows(
-  rows: readonly Omit<HistoricalFilterRow, "rank">[],
+  rows: readonly HistoricalFilterRow[],
   sortBy: HistoricalFilterSortKey,
   direction: HistoricalSortDirection,
 ) {
@@ -902,7 +1119,7 @@ function sortFilterRows(
   });
 }
 
-function filterSortValue(row: Omit<HistoricalFilterRow, "rank">, sortBy: HistoricalFilterSortKey) {
+function filterSortValue(row: HistoricalFilterRow, sortBy: HistoricalFilterSortKey) {
   switch (sortBy) {
     case "rank":
       return row.returnPercent;
@@ -922,6 +1139,8 @@ function filterSortValue(row: Omit<HistoricalFilterRow, "rank">, sortBy: Histori
       return row.oneMonthReturnPercent;
     case "threeMonthReturn":
       return row.threeMonthReturnPercent;
+    case "momentumScore":
+      return row.momentumScore;
     case "averageTradedValue":
       return row.averageTradedValue;
   }
@@ -990,7 +1209,7 @@ function toExperimentView(experiment: {
     readonly returnPercent: unknown;
     readonly excludedReason: string | null;
     readonly createdAt: Date;
-    readonly company: { readonly id: string; readonly name: string; readonly isin: string };
+    readonly company: { readonly id: string; readonly name: string; readonly isin: string; readonly sector: string | null };
     readonly instrument: { readonly id: string; readonly exchange: Exchange; readonly symbol: string };
   }[];
 }): ReturnExperimentView {
@@ -1019,13 +1238,14 @@ function toPositionView(position: {
   readonly returnPercent: unknown;
   readonly excludedReason: string | null;
   readonly createdAt: Date;
-  readonly company: { readonly id: string; readonly name: string; readonly isin: string };
+  readonly company: { readonly id: string; readonly name: string; readonly isin: string; readonly sector: string | null };
   readonly instrument: { readonly id: string; readonly exchange: Exchange; readonly symbol: string };
 }): ReturnExperimentPositionView {
   return {
     id: position.id,
     companyId: position.company.id,
     companyName: position.company.name,
+    sector: position.company.sector,
     isin: position.company.isin,
     instrumentId: position.instrument.id,
     symbol: position.instrument.symbol,

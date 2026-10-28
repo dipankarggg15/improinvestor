@@ -520,7 +520,9 @@ function feeFor(grossValue: Prisma.Decimal, config: EffectiveCounterfactualConfi
 function groupPrices(prices: readonly CounterfactualPricePoint[] | readonly StrategyPricePoint[]) {
   const grouped = new Map<string, CounterfactualPricePoint[]>();
   for (const price of prices as CounterfactualPricePoint[]) {
-    grouped.set(price.instrumentId, [...(grouped.get(price.instrumentId) ?? []), price]);
+    const instrumentPrices = grouped.get(price.instrumentId);
+    if (instrumentPrices) instrumentPrices.push(price);
+    else grouped.set(price.instrumentId, [price]);
   }
   for (const rows of grouped.values()) rows.sort((left, right) => left.tradingDate.getTime() - right.tradingDate.getTime());
   return grouped;

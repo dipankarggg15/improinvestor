@@ -306,7 +306,9 @@ async function pricesAfterEarliestExitByInstrument(
   });
   const grouped = new Map<string, typeof prices>();
   for (const price of prices) {
-    grouped.set(price.instrumentId, [...(grouped.get(price.instrumentId) ?? []), price]);
+    const instrumentPrices = grouped.get(price.instrumentId);
+    if (instrumentPrices) instrumentPrices.push(price);
+    else grouped.set(price.instrumentId, [price]);
   }
   return grouped;
 }

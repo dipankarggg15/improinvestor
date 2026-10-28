@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  classifySelectedDate,
   findingMomentumRankingRules,
   findingMomentumOptions,
+  latestSafeNseEodDate,
   parseFindingMomentumOption,
 } from "@/lib/finding-momentum/service";
 import {
@@ -37,6 +39,27 @@ describe("Finding Momentum options", () => {
     expect(parseFindingMomentumOption("raw-3m-6m")).toBe("raw-3m-6m");
     expect(parseFindingMomentumOption("unsupported")).toBeUndefined();
     expect(parseFindingMomentumOption(undefined)).toBeUndefined();
+  });
+
+  it("caps refreshes at the latest completed NSE EOD in India time", () => {
+    expect(latestSafeNseEodDate(new Date("2026-10-22T11:30:00.000Z")).toISOString().slice(0, 10)).toBe("2026-10-21");
+    expect(latestSafeNseEodDate(new Date("2026-10-22T12:30:00.000Z")).toISOString().slice(0, 10)).toBe("2026-10-22");
+  });
+
+  it("distinguishes an in-progress import from a non-trading date", () => {
+    expect(classifySelectedDate({
+      selectedDate: new Date("2026-10-23T00:00:00.000Z"),
+      rankingDateUsed: new Date("2026-10-21T00:00:00.000Z"),
+      completedThrough: new Date("2026-10-21T00:00:00.000Z"),
+      latestSafeDate: new Date("2026-10-25T00:00:00.000Z"),
+    })).toBe("updating");
+
+    expect(classifySelectedDate({
+      selectedDate: new Date("2026-10-24T00:00:00.000Z"),
+      rankingDateUsed: new Date("2026-10-23T00:00:00.000Z"),
+      completedThrough: new Date("2026-10-25T00:00:00.000Z"),
+      latestSafeDate: new Date("2026-10-25T00:00:00.000Z"),
+    })).toBe("no-session");
   });
 
   it("keeps volatility options aligned with their respective strategy ranking rules", () => {

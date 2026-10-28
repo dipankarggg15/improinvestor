@@ -49,6 +49,7 @@ export type Momentum10HistoricalRules = {
 
 export type NseMomentumHistoricalRules = {
   readonly momentumMonths?: readonly [1, 3] | readonly [3, 6] | readonly [6, 12];
+  readonly initialRankingLagSessions: number;
   readonly maxEntryRank: number | null;
   readonly maxPositions: number;
   readonly initialCapital: number;
@@ -171,6 +172,7 @@ export type HistoricalEventResult = {
     | "INITIAL_SELECTION"
     | "BUY"
     | "BUY_SKIPPED_UPPER_CIRCUIT"
+    | "BUY_SKIPPED_NO_EXECUTION_PRICE"
     | "BUY_SKIPPED_STRENGTH_FILTER"
     | "WINNER_REINVESTMENT"
     | "LOSS_PROTECTION_TRIGGERED"
@@ -336,6 +338,7 @@ export const momentum10HistoricalRules: Momentum10HistoricalRules = {
 };
 
 export const nseMomentumHistoricalRules: NseMomentumHistoricalRules = {
+  initialRankingLagSessions: 0,
   maxEntryRank: null,
   maxPositions: 20,
   initialCapital: 1_000_000,
@@ -349,7 +352,7 @@ export const nseMomentumHistoricalRules: NseMomentumHistoricalRules = {
   maxNewPositionWeightPercent: null,
   useAvailableCashForReplacements: false,
   skipLikelyUpperCircuitBuys: true,
-  likelyUpperCircuitMinGainPercent: 4.5,
+  likelyUpperCircuitMinGainPercent: 1.8,
   winnerReinvestment: {
     enabled: false,
     winnerReturnPercent: 50,
@@ -627,6 +630,10 @@ export function simulateNseMomentumHistorical(input: {
   if (!effectiveStart || !effectiveEnd || effectiveStart > effectiveEnd) {
     throw new Error("No available UPSTOX_REAL NSE trading dates with 1-year lookback exist in the requested range.");
   }
+  const initialRankingDate = tradingDateSessionsBefore(allTradingDates, effectiveStart, rules.initialRankingLagSessions);
+  if (!initialRankingDate) {
+    throw new Error("No prior UPSTOX_REAL NSE trading date exists for the initial momentum ranking.");
+  }
 
   const simulationDates = allTradingDates.filter((date) => date >= effectiveStart && date <= effectiveEnd);
   const events: HistoricalEventResult[] = [];
@@ -650,12 +657,12 @@ export function simulateNseMomentumHistorical(input: {
     rules.lossProtection.exitMode === "marketBreadth200Day"
     || rules.lossProtection.reentryMode === "marketBreadth200Day"
   )
-    ? nseMarketBreadthSeries(input.candidates, pricesByInstrument, simulationDates, rules.lossProtection.recoveryLookbackSessions)
+    ? nseMarketBreadthSeries(input.candidates, pricesByInstrument, [initialRankingDate, ...simulationDates], rules.lossProtection.recoveryLookbackSessions)
     : null;
 
-  const initialRanking = rankNseMomentum(input.candidates, pricesByInstrument, dateFromKey(effectiveStart), rules, rankCache);
+  const initialRanking = rankNseMomentum(input.candidates, pricesByInstrument, dateFromKey(initialRankingDate), rules, rankCache);
   const initialBreadth = rules.lossProtection.enabled && rules.lossProtection.exitMode === "marketBreadth200Day"
-    ? marketBreadthByDate?.get(effectiveStart) ?? { eligibleCount: 0, percentAbove: 0 }
+    ? marketBreadthByDate?.get(initialRankingDate) ?? { eligibleCount: 0, percentAbove: 0 }
     : null;
   const initialRiskOn = !initialBreadth
     || (initialBreadth.eligibleCount > 0 && initialBreadth.percentAbove >= rules.lossProtection.recoveryBreadthPercent);
@@ -678,6 +685,8 @@ export function simulateNseMomentumHistorical(input: {
     skippedTopRanks: rules.skipTopRanks,
     rankRange: nseMomentumBuyRankRangeLabel(rules),
     ranking: "momentumScore desc",
+    rankingAsOfDate: initialRankingDate,
+    executionDate: effectiveStart,
     universe: "NSE only",
     marketRegimeRiskOn: initialRiskOn,
     marketBreadthPercent: initialBreadth ? round(initialBreadth.percentAbove) : null,
@@ -1267,11 +1276,12 @@ export function simulateNseMomentumHistorical(input: {
     limitations: limitations(),
     assumptions: [
       "NSE Momentum uses only NSE-listed UPSTOX_REAL candidates and stored close prices.",
+      `The initial selection is ranked from the close ${rules.initialRankingLagSessions} trading session before entry (${initialRankingDate}) and simulated purchases execute at the ${effectiveStart} close, avoiding entry-day look-ahead bias.`,
       "No market-cap, fundamental, P/E, debt/equity, ATV/liquidity, or stop-loss filter is applied.",
       rules.lossProtection.enabled
         ? nseMomentumLossProtectionAssumption(rules)
         : "Portfolio-level peak-drawdown protection is disabled.",
-      `Buy candidates are skipped as likely upper-circuit when high, low, and close are locked at the same price and close is at least ${rules.likelyUpperCircuitMinGainPercent}% above the previous close; winner top-ups wait in cash until the same condition clears. Official exchange price-band data is not available.`,
+      `Buy candidates are skipped as likely upper-circuit when the session high reaches an inferred 2%, 5%, 10%, or 20% price band above the previous close; winner top-ups wait in cash until the same condition clears. Official exchange price-band data is not available.`,
       nseMomentumStrengthAssumption(rules),
       rules.useAvailableCashForReplacements
         ? "Replacement buys may use accumulated cash plus current review sale proceeds; each selected replacement remains subject to the configured new-position allocation cap."
@@ -1600,7 +1610,7 @@ export function simulateParentNseMomentumHistorical(input: {
         ? `The portfolio reviews every ${rules.rebalanceFrequencyMonths} months on the same trading-day schedule. Initial Top ${rules.maxPositions} purchases are equal weighted. Survivors keep their original shares and entry dates without trimming or top-ups. Only holdings outside the current Top ${rules.maxPositions} are sold; sale proceeds plus residual cash are split equally among unowned selected entrants. Unfilled allocations remain in cash. Weights drift without a cap.`
         : `The portfolio fully rebalances every ${rules.rebalanceFrequencyMonths} months on the first available trading day on or after the scheduled target date, selecting the current Top ${rules.maxPositions} and rebalancing to equal weights.`,
       rules.skipLikelyUpperCircuitBuys
-        ? `New purchases are skipped when high, low, and close are locked at the same price and close is at least ${rules.likelyUpperCircuitMinGainPercent}% above the previous close. The unfilled allocation remains in cash until a later review; official exchange price-band data is unavailable.`
+        ? "New purchases are skipped when the session high reaches an inferred 2%, 5%, 10%, or 20% price band above the previous close. The unfilled allocation remains in cash until a later review; official exchange price-band data is unavailable."
         : "No upper-circuit buy filter is applied.",
       `Approximate turnover value across sales and purchases was ${round(turnoverValue)}; turnover percent of starting capital was ${round(returnPercent(rules.initialCapital, rules.initialCapital + turnoverValue))}.`,
     ],
@@ -1627,7 +1637,6 @@ function selectNseMomentumBuyCandidates(
   const candidates = prioritizeNseMomentumFormerHoldings(
     ranked
     .filter((candidate) => candidate.rank > rules.skipTopRanks)
-    .filter((candidate) => rules.maxEntryRank === null || candidate.rank <= rules.maxEntryRank)
     .filter((candidate) => !heldCompanyIds.has(candidate.companyId) && !excludedCompanyIds.has(candidate.companyId)),
     rules,
     formerHoldingCompanyIds,
@@ -1646,8 +1655,16 @@ function selectNseMomentumBuyCandidates(
       continue;
     }
 
-    const price = priceOn(pricesByInstrument.get(candidate.instrumentId) ?? [], buyDate);
-    if (isLikelyUpperCircuitBuy(price, pricesByInstrument.get(candidate.instrumentId) ?? [], rules)) {
+    const candidatePrices = pricesByInstrument.get(candidate.instrumentId) ?? [];
+    const price = priceOn(candidatePrices, buyDate);
+    if (!price || price.close <= 0) {
+      events.push(event("BUY_SKIPPED_NO_EXECUTION_PRICE", buyDate, null, candidate.companyId, candidate.instrumentId, {
+        symbol: candidate.symbol,
+        rank: candidate.rank,
+      }));
+      continue;
+    }
+    if (isLikelyUpperCircuitBuy(price, candidatePrices, rules)) {
       events.push(event("BUY_SKIPPED_UPPER_CIRCUIT", buyDate, null, candidate.companyId, candidate.instrumentId, {
         symbol: candidate.symbol,
         rank: candidate.rank,
@@ -1806,6 +1823,9 @@ function nseMomentumStrengthAssumption(rules: NseMomentumHistoricalRules) {
 
 function nseMomentumBuyRankRangeLabel(rules: NseMomentumHistoricalRules) {
   const start = rules.skipTopRanks + 1;
+  if (rules.maxEntryRank !== null) {
+    return `ranks ${start}-${rules.maxEntryRank}, then next-ranked executable backups until ${rules.maxPositions} holdings`;
+  }
   const end = rules.maxEntryRank ?? rules.skipTopRanks + rules.maxPositions;
   return `ranks ${start}-${end}`;
 }
@@ -1820,17 +1840,23 @@ function isLikelyUpperCircuitBuy(
     !price ||
     price.close <= 0 ||
     price.high === null ||
-    price.high === undefined ||
-    price.low === null ||
-    price.low === undefined
+    price.high === undefined
   ) {
     return false;
   }
-  if (Math.abs(price.high - price.close) > 0.0001) return false;
-  if (Math.abs(price.low - price.close) > 0.0001) return false;
   const previousClose = previousCloseBefore(prices, toDateKey(price.tradingDate));
   if (!previousClose || previousClose <= 0) return false;
-  return returnPercent(previousClose, price.close) >= rules.likelyUpperCircuitMinGainPercent;
+  const highGainPercent = returnPercent(previousClose, price.high);
+  if (highGainPercent < rules.likelyUpperCircuitMinGainPercent) return false;
+
+  const closesAtSessionHigh = Math.abs(price.close - price.high) <= Math.max(0.01, Math.abs(price.high) * 0.000001);
+  const closeGainPercent = returnPercent(previousClose, price.close);
+  if (closesAtSessionHigh && closeGainPercent >= rules.likelyUpperCircuitMinGainPercent) return true;
+
+  return [2, 5, 10, 20].some((bandPercent) => {
+    const roundingTolerance = Math.max(0.15, bandPercent * 0.015);
+    return Math.abs(highGainPercent - bandPercent) <= roundingTolerance;
+  });
 }
 
 function previousCloseBefore(prices: readonly HistoricalRunnerPrice[], dateKey: string) {
@@ -3302,7 +3328,9 @@ function averageTradedValue(prices: readonly HistoricalRunnerPrice[], startDate:
 function groupPrices(prices: readonly HistoricalRunnerPrice[]) {
   const grouped = new Map<string, HistoricalRunnerPrice[]>();
   for (const price of prices) {
-    grouped.set(price.instrumentId, [...(grouped.get(price.instrumentId) ?? []), price]);
+    const instrumentPrices = grouped.get(price.instrumentId);
+    if (instrumentPrices) instrumentPrices.push(price);
+    else grouped.set(price.instrumentId, [price]);
   }
   for (const rows of grouped.values()) rows.sort((left, right) => left.tradingDate.getTime() - right.tradingDate.getTime());
   return grouped;
@@ -3342,6 +3370,12 @@ function lastDateOnOrBefore(dates: readonly string[], target: string) {
     if (date && date <= target) return date;
   }
   return null;
+}
+
+function tradingDateSessionsBefore(dates: readonly string[], date: string, sessions: number) {
+  const dateIndex = dates.indexOf(date);
+  if (dateIndex < 0) return null;
+  return dates[dateIndex - Math.max(0, sessions)] ?? null;
 }
 
 function firstDateWithRequiredLookback(dates: readonly string[], requestedStart: string, effectiveEnd: string | null) {
@@ -3434,7 +3468,7 @@ function unavailableFilters() {
 function limitations() {
   return [
     "Uses UPSTOX_REAL stored DailyPrice.close as the official simulation price.",
-    "Open, high, and low are used only for the likely upper-circuit new-buy and winner-top-up skip heuristic; adjusted close and corporate action tables are not used.",
+    "The session high and previous close are used only for the inferred 2%, 5%, 10%, or 20% upper-circuit new-buy and winner-top-up skip heuristic; adjusted close, official price-band, and corporate action tables are not used.",
     "Stored prices are treated as unadjusted unless provider semantics prove otherwise.",
     "The imported real universe may contain survivorship bias because delisted or inactive historical stocks may be absent.",
   ];

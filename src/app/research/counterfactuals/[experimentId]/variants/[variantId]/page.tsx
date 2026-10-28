@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { prisma } from "@/lib/db/prisma";
 import { getCounterfactualVariantDetail } from "@/lib/counterfactuals/service";
 import { formatCurrency, formatDate, formatPercent, formatQuantity } from "@/lib/ui/format";
@@ -49,7 +51,7 @@ export default async function CounterfactualVariantPage({ params }: PageProps) {
               {run.trades.map((trade) => (
                 <tr className="border-t border-[var(--border)]" key={trade.id}>
                   <td className="py-3 pr-3">{formatDate(trade.tradeDate)}</td>
-                  <td className="py-3 pr-3">{trade.company.name}</td>
+                  <td className="py-3 pr-3"><StockChartLink className="block font-medium text-[var(--accent)] hover:underline" date={formatDate(trade.tradeDate)} exchange={trade.instrument.exchange} symbol={trade.instrument.symbol}>{trade.company.name}</StockChartLink><SectorStatus className="text-xs text-[var(--muted)]" date={formatDate(trade.tradeDate)} sector={trade.company.sector} /></td>
                   <td className="py-3 pr-3">{trade.side}</td>
                   <td className="py-3 pr-3">{formatQuantity(trade.quantity.toNumber())}</td>
                   <td className="py-3 pr-3">{formatCurrency(trade.price.toNumber())}</td>
@@ -69,7 +71,7 @@ export default async function CounterfactualVariantPage({ params }: PageProps) {
             <tbody>
               {run.positionEpisodes.map((episode) => (
                 <tr className="border-t border-[var(--border)]" key={episode.id}>
-                  <td className="py-3 pr-3">{episode.company.name}</td>
+                  <td className="py-3 pr-3"><StockChartLink className="block font-medium text-[var(--accent)] hover:underline" date={formatDate(episode.openedAt)} exchange={episode.instrument.exchange} symbol={episode.instrument.symbol}>{episode.company.name}</StockChartLink><SectorStatus className="text-xs text-[var(--muted)]" date={formatDate(episode.openedAt)} sector={episode.company.sector} /></td>
                   <td className="py-3 pr-3">{formatDate(episode.openedAt)}</td>
                   <td className="py-3 pr-3">{episode.closedAt ? formatDate(episode.closedAt) : "-"}</td>
                   <td className="py-3 pr-3">{episode.status}</td>

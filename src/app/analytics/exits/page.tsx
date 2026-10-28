@@ -2,6 +2,9 @@ import Link from "next/link";
 
 import { updatePostExitObservationsAction } from "@/app/analytics/exits/actions";
 import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
+import { EmptyState } from "@/components/ui/empty-state";
 import { calculateExitReasonAnalytics, calculatePostExitEvidence, type EpisodeAnalyticsInput } from "@/lib/analytics/episodes";
 import { prisma } from "@/lib/db/prisma";
 import { listClosedEpisodes } from "@/lib/exits/service";
@@ -48,7 +51,7 @@ export default async function ExitAnalyticsPage({ searchParams }: ExitAnalyticsP
           </div>
           <form action={updatePostExitObservationsAction}>
             <ConfirmSubmitButton
-              confirmMessage="Update missing post-exit observations from the stored synthetic price history?"
+              confirmMessage="Update missing post-exit observations from the stored market price history?"
               pendingLabel="Updating..."
             >
               Update Post-Exit Observations
@@ -56,37 +59,38 @@ export default async function ExitAnalyticsPage({ searchParams }: ExitAnalyticsP
           </form>
         </div>
 
-        <form className="grid gap-3 rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:grid-cols-2 lg:grid-cols-5">
-          <label className="grid gap-2 text-sm font-medium">
+        <form className="grid w-full min-w-0 gap-3 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-5">
+          <label className="grid min-w-0 gap-2 text-sm font-medium">
             Strategy
-            <select className="h-10 rounded-md border border-[var(--border)] px-3" defaultValue={query.strategyId ?? ""} name="strategyId">
+            <select className="h-10 w-full min-w-0 rounded-md border border-[var(--border)] px-3" defaultValue={query.strategyId ?? ""} name="strategyId">
               <option value="">All</option>
               {strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name}</option>)}
             </select>
           </label>
-          <label className="grid gap-2 text-sm font-medium">
+          <label className="grid min-w-0 gap-2 text-sm font-medium">
             Source
-            <select className="h-10 rounded-md border border-[var(--border)] px-3" defaultValue={query.exitSource ?? ""} name="exitSource">
+            <select className="h-10 w-full min-w-0 rounded-md border border-[var(--border)] px-3" defaultValue={query.exitSource ?? ""} name="exitSource">
               <option value="">All</option>
               <option value="REVIEW_RECOMMENDATION">Review Recommendation</option>
               <option value="MANUAL">Manual</option>
             </select>
           </label>
-          <label className="grid gap-2 text-sm font-medium">
+          <label className="grid min-w-0 gap-2 text-sm font-medium">
             Reason
-            <input className="h-10 rounded-md border border-[var(--border)] px-3" defaultValue={query.reason ?? ""} name="reason" placeholder="SELL_EMERGENCY_STOP" />
+            <input className="h-10 w-full min-w-0 rounded-md border border-[var(--border)] px-3" defaultValue={query.reason ?? ""} name="reason" placeholder="SELL_EMERGENCY_STOP" />
           </label>
-          <label className="grid gap-2 text-sm font-medium">
+          <label className="grid min-w-0 gap-2 text-sm font-medium">
             From
-            <input className="h-10 rounded-md border border-[var(--border)] px-3" defaultValue={query.fromDate ?? ""} name="fromDate" type="date" />
+            <input className="h-10 w-full min-w-0 rounded-md border border-[var(--border)] px-3" defaultValue={query.fromDate ?? ""} name="fromDate" type="date" />
           </label>
-          <label className="grid gap-2 text-sm font-medium">
+          <label className="grid min-w-0 gap-2 text-sm font-medium">
             To
-            <input className="h-10 rounded-md border border-[var(--border)] px-3" defaultValue={query.toDate ?? ""} name="toDate" type="date" />
+            <input className="h-10 w-full min-w-0 rounded-md border border-[var(--border)] px-3" defaultValue={query.toDate ?? ""} name="toDate" type="date" />
           </label>
-          <button className="h-10 rounded-md border border-[var(--border)] px-4 text-sm font-semibold text-[var(--accent)] lg:col-span-5 lg:w-fit" type="submit">
+          <button className="h-10 rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white lg:col-span-5 lg:w-fit" type="submit">
             Apply Filters
           </button>
+          {query.strategyId || query.exitSource || query.reason || query.fromDate || query.toDate ? <Link className="text-center text-sm font-semibold text-[var(--accent)] lg:col-span-5 lg:w-fit" href="/analytics/exits">Clear all filters</Link> : null}
         </form>
 
         <div className="grid gap-3 md:grid-cols-4">
@@ -139,10 +143,12 @@ export default async function ExitAnalyticsPage({ searchParams }: ExitAnalyticsP
                 {episodes.map((episode) => (
                   <tr className="border-t border-[var(--border)]" key={episode.id}>
                     <td className="py-3 pr-3">
-                      <Link className="font-medium text-[var(--accent)]" href={`/portfolio/${episode.portfolioId}/episodes/${episode.id}`}>
+                      <StockChartLink className="font-medium text-[var(--accent)] hover:underline" exchange={episode.instrument.exchange} symbol={episode.instrument.symbol}>
                         {episode.company.name}
-                      </Link>
+                      </StockChartLink>
                       <span className="ml-2 text-xs text-[var(--muted)]">{episode.instrument.symbol} {episode.instrument.exchange}</span>
+                      <SectorStatus className="block text-xs text-[var(--muted)]" sector={episode.company.sector} />
+                      <Link className="ml-2 text-xs text-[var(--accent)] hover:underline" href={`/portfolio/${episode.portfolioId}/episodes/${episode.id}`}>Episode</Link>
                     </td>
                     <td className="py-3 pr-3">{episode.portfolio.name}</td>
                     <td className="py-3 pr-3">{episode.strategy.name}</td>
@@ -161,7 +167,7 @@ export default async function ExitAnalyticsPage({ searchParams }: ExitAnalyticsP
               </tbody>
             </table>
           </div>
-          {episodes.length === 0 ? <p className="mt-3 text-sm text-[var(--muted)]">No closed episodes match these filters.</p> : null}
+          {episodes.length === 0 ? <div className="mt-4"><EmptyState action={{ href: "/trades", label: "Open trade history" }} secondaryAction={{ href: "/analytics", label: "View portfolio analytics" }} title="No exit evidence for this view" description="Closed position episodes will appear here with realized results and post-exit observations. Adjust filters if you expected an existing exit." icon="↘" /></div> : null}
         </div>
       </div>
     </section>

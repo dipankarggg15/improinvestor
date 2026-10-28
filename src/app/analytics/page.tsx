@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { EmptyState } from "@/components/ui/empty-state";
 import { prisma } from "@/lib/db/prisma";
 import { getStrategyEvidence } from "@/lib/analytics/evidence";
 import type { EquityCurvePoint } from "@/lib/analytics/equity";
@@ -40,7 +41,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
         <div>
           <p className="text-sm font-medium text-[var(--accent)]">REAL MARKET DATA</p>
           <h1 className="mt-2 text-3xl font-semibold">Strategy Analytics</h1>
-          <p className="mt-2 text-sm text-[var(--muted)]">Development analytics based on fictional market data. These describe what happened; they do not change strategy rules.</p>
+          <p className="mt-2 text-sm text-[var(--muted)]">Analytics use the stored portfolio ledger and available market prices. They describe what happened and do not change strategy rules.</p>
         </div>
 
         <form className="grid gap-3 rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:grid-cols-2 lg:grid-cols-5">
@@ -197,7 +198,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
             </Link>
           </>
         ) : (
-          <p className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5 text-sm text-[var(--muted)]">No portfolio analytics are available yet.</p>
+          <EmptyState action={{ href: "/trades/new", label: "Record a trade" }} secondaryAction={{ href: "/strategies", label: "Review strategies" }} title="No portfolio evidence yet" description="Analytics become available after trades create position history. Start a ledger, then return here to compare returns, drawdowns, winners, and exits." icon="⌁" />
         )}
       </div>
     </section>

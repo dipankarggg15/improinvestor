@@ -4,6 +4,16 @@ export function formatDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+export function formatDisplayDate(date: Date | string) {
+  const value = typeof date === "string" ? new Date(`${date}T00:00:00.000Z`) : date;
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  }).format(value);
+}
+
 export function formatCrores(value: number) {
   return `₹${(value / crore).toLocaleString("en-IN", {
     maximumFractionDigits: 2,

@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { EmptyState } from "@/components/ui/empty-state";
 import { HistoricalExperimentRepository } from "@/lib/research/historical-experiment";
 import { formatPercent } from "@/lib/ui/format";
 
@@ -21,9 +22,7 @@ export default async function ReturnHistoryPage() {
         </div>
 
         {experiments.length === 0 ? (
-          <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] px-4 py-10 text-center text-sm text-[var(--muted)]">
-            No saved returns yet.
-          </div>
+          <EmptyState action={{ href: "/screener", label: "Start a return experiment" }} secondaryAction={{ href: "/finding-momentum", label: "Find candidate stocks" }} title="No saved return studies yet" description="Use the Custom Screener to select historical candidates, measure their later returns, and save the result here for comparison." icon="↗" />
         ) : (
           <div className="max-w-full overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel)] shadow-sm">
             <table className="w-full min-w-[860px] border-collapse text-left text-sm">

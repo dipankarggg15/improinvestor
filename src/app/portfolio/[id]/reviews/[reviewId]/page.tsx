@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { prisma } from "@/lib/db/prisma";
 import { formatCurrency, formatDate, formatPercent, formatQuantity } from "@/lib/ui/format";
 
@@ -60,8 +62,8 @@ export default async function ReviewDetailPage({ params }: ReviewDetailPageProps
             <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5" key={snapshot.id}>
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-lg font-semibold">{snapshot.company.name}</h2>
-                  <p className="mt-1 text-sm text-[var(--muted)]">{snapshot.instrument.symbol} ({snapshot.instrument.exchange})</p>
+                  <h2 className="text-lg font-semibold"><StockChartLink className="text-[var(--accent)] hover:underline" date={formatDate(review.reviewDate)} exchange={snapshot.instrument.exchange} symbol={snapshot.instrument.symbol}>{snapshot.company.name}</StockChartLink></h2>
+                  <p className="mt-1 text-sm text-[var(--muted)]">{snapshot.instrument.symbol} ({snapshot.instrument.exchange}) · <SectorStatus date={formatDate(review.reviewDate)} sector={snapshot.company.sector} /></p>
                 </div>
                 <span className={`rounded-md px-3 py-1 text-sm font-semibold ${snapshot.recommendation === "SELL" ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"}`}>
                   {snapshot.recommendation}
@@ -111,7 +113,7 @@ export default async function ReviewDetailPage({ params }: ReviewDetailPageProps
                       {context.map((row) => (
                         <tr className="border-t border-[var(--border)]" key={`${row.rank}-${row.symbol}`}>
                           <td className="py-2 pr-3">{row.rank}</td>
-                          <td className="py-2 pr-3">{row.companyName}</td>
+                          <td className="py-2 pr-3"><StockChartLink className="text-[var(--accent)] hover:underline" date={formatDate(review.reviewDate)} exchange={row.exchange ?? "NSE"} symbol={row.symbol ?? ""}>{row.companyName}</StockChartLink></td>
                           <td className="py-2 pr-3">{row.symbol} {row.exchange}</td>
                           <td className="py-2 pr-3">{formatPercent(row.rankingMetricValue)}</td>
                         </tr>

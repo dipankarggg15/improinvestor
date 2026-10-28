@@ -7,6 +7,11 @@ describe("isProtectedPath", () => {
     expect(isProtectedPath("/")).toBe(true);
     expect(isProtectedPath("/portfolio")).toBe(true);
     expect(isProtectedPath("/portfolio/example")).toBe(true);
+    expect(isProtectedPath("/trades/search")).toBe(true);
+    expect(isProtectedPath("/finding-momentum")).toBe(true);
+    expect(isProtectedPath("/swing-setups")).toBe(true);
+    expect(isProtectedPath("/watchlists/example")).toBe(true);
+    expect(isProtectedPath("/charts/NSE/RELIANCE")).toBe(true);
     expect(isProtectedPath("/strategies/example/runs/run")).toBe(true);
     expect(isProtectedPath("/analytics/exits")).toBe(true);
     expect(isProtectedPath("/research/counterfactuals")).toBe(true);

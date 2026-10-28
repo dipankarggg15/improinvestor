@@ -34,13 +34,15 @@ async function searchEligibleInstruments(query: string) {
       companyId: true,
       exchange: true,
       symbol: true,
-      company: { select: { name: true } },
+      company: { select: { name: true, sector: true } },
     },
   });
   const byCompany = new Map<string, typeof instruments>();
 
   for (const instrument of instruments) {
-    byCompany.set(instrument.companyId, [...(byCompany.get(instrument.companyId) ?? []), instrument]);
+    const companyInstruments = byCompany.get(instrument.companyId);
+    if (companyInstruments) companyInstruments.push(instrument);
+    else byCompany.set(instrument.companyId, [instrument]);
   }
 
   const canonical = [...byCompany.values()]
@@ -57,6 +59,7 @@ async function searchEligibleInstruments(query: string) {
       companyId: instrument.companyId,
       instrumentId: instrument.id,
       companyName: instrument.company.name,
+      sector: instrument.company.sector,
       symbol: instrument.symbol,
       exchange: instrument.exchange,
     })),
@@ -68,6 +71,7 @@ async function searchEligibleInstruments(query: string) {
       companyId: instrument.companyId,
       instrumentId: instrument.instrumentId,
       companyName: instrument.companyName,
+      sector: instrument.sector,
       symbol: instrument.symbol,
       exchange: instrument.exchange,
     }));
@@ -83,7 +87,7 @@ async function searchOpenHoldings(query: string) {
       portfolioId: true,
       companyId: true,
       instrumentId: true,
-      company: { select: { name: true } },
+      company: { select: { name: true, sector: true } },
       instrument: { select: { symbol: true, exchange: true } },
       strategyVersion: {
         select: {
@@ -108,6 +112,7 @@ async function searchOpenHoldings(query: string) {
         companyId: episode.companyId,
         instrumentId: episode.instrumentId,
         companyName: episode.company.name,
+        sector: episode.company.sector,
         symbol: episode.instrument.symbol,
         exchange: episode.instrument.exchange,
         availableQuantity: quantity.toString(),

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { HistoricalExperimentRepository, type ReturnExperimentStats } from "@/lib/research/historical-experiment";
 import { formatPercent } from "@/lib/ui/format";
 
@@ -51,10 +53,10 @@ export default async function ReturnHistoryDetailPage({
               {experiment.positions.map((position) => (
                 <tr className="border-b border-[var(--border)] last:border-b-0" key={position.id}>
                   <td className="px-3 py-3">
-                    <span className="block font-medium text-[var(--foreground)]">{position.companyName}</span>
-                    <span className="text-xs text-[var(--muted)]">{position.isin}</span>
+                    <StockChartLink className="block font-medium text-[var(--accent)] hover:underline" date={position.actualEndDate ?? position.requestedEndDate} exchange={position.exchange} symbol={position.symbol}>{position.companyName}</StockChartLink>
+                    <span className="text-xs text-[var(--muted)]">{position.isin} · </span><SectorStatus className="text-xs text-[var(--muted)]" date={position.actualEndDate ?? position.requestedEndDate} sector={position.sector} />
                   </td>
-                  <td className="px-3 py-3">{position.exchange}:{position.symbol}</td>
+                  <td className="px-3 py-3"><StockChartLink className="hover:underline" date={position.actualEndDate ?? position.requestedEndDate} exchange={position.exchange} symbol={position.symbol}>{position.exchange}:{position.symbol}</StockChartLink></td>
                   <td className="px-3 py-3">{position.requestedStartDate}</td>
                   <td className="px-3 py-3">{position.requestedEndDate}</td>
                   <td className="px-3 py-3">{position.holdingDays === null ? "-" : `${position.holdingDays}d`}</td>

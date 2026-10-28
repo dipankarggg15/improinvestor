@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { prisma } from "@/lib/db/prisma";
 import { getCounterfactualExperimentOverview } from "@/lib/counterfactuals/service";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/ui/format";
@@ -97,7 +99,7 @@ export default async function CounterfactualExperimentPage({ params }: PageProps
                 <tr className="border-t border-[var(--border)]" key={`${row.variant}-${row.date}-${row.company}-${row.variantDecision}`}>
                   <td className="py-3 pr-3">{row.variant}</td>
                   <td className="py-3 pr-3">{row.date}</td>
-                  <td className="py-3 pr-3">{row.company}</td>
+                  <td className="py-3 pr-3"><StockChartLink className="block font-medium text-[var(--accent)] hover:underline" date={row.date} exchange={row.exchange} symbol={row.symbol}>{row.company}</StockChartLink><SectorStatus className="text-xs text-[var(--muted)]" date={row.date} sector={row.sector} /></td>
                   <td className="py-3 pr-3">{row.controlDecision}</td>
                   <td className="py-3 pr-3">{row.variantDecision}</td>
                   <td className="py-3 pr-3">{row.reason}</td>
@@ -128,6 +130,9 @@ function decisionDifferences(variants: NonNullable<Awaited<ReturnType<typeof get
         variant: variant.name,
         date: formatDate(decision.decisionDate),
         company: decision.company.name,
+        sector: decision.company.sector,
+        exchange: decision.instrument.exchange,
+        symbol: decision.instrument.symbol,
         controlDecision: controlDecision ? `${controlDecision.action} ${controlDecision.reason}` : "NO CONTROL DECISION",
         variantDecision: `${decision.action} ${decision.reason}`,
         reason: decision.reason,

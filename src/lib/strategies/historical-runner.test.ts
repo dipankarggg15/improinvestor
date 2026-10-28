@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { annotateReturnIfHeldToEndPercent, rulesForParentNseMomentumVariant, rulesForNseMomentumVariant } from "@/lib/strategies/historical-run-service";
-import { nseParentMomentumFullUniverseV9Config, nseParentMomentumSurvivorsV1Config, nseParentMomentumSurvivorsV2Config, nseParentMomentumSurvivorsV3Config, nseMomentumAfter10V2Config, nseMomentumLossProtectionV1Config, nseMomentumLossProtectionV2Config, nseMomentumLossProtectionV3Config, nseMomentumLossProtectionV4Config, nseMomentumLossProtectionV5Config, nseMomentumLossProtectionV6Config, nseMomentumLossProtectionV7Config, nseMomentumRawSixTwelveV3Config, nseMomentumSixTwelveV3Config, nseMomentumStrengthV2Config, nseMomentumTwoPhaseV1Config, nseMomentumTwoPhaseV2Config, nseMomentumWinnersV7Config, nseMomentumWinnersV8Config, nseMomentumWinnersV9Config, nseMomentumWinnersV10Config } from "@/lib/strategies/config";
+import { nseParentMomentumFullUniverseV9Config, nseParentMomentumSurvivorsV1Config, nseParentMomentumSurvivorsV2Config, nseParentMomentumSurvivorsV3Config, nseMomentumAfter10V2Config, nseMomentumLossProtectionV1Config, nseMomentumLossProtectionV2Config, nseMomentumLossProtectionV3Config, nseMomentumLossProtectionV4Config, nseMomentumLossProtectionV5Config, nseMomentumLossProtectionV6Config, nseMomentumLossProtectionV7Config, nseMomentumRawSixTwelveV3Config, nseMomentumSixTwelveV3Config, nseMomentumStrengthV2Config, nseMomentumTwoPhaseV1Config, nseMomentumTwoPhaseV2Config, nseMomentumTwoPhaseV3Config, nseMomentumWinnersV7Config, nseMomentumWinnersV8Config, nseMomentumWinnersV9Config, nseMomentumWinnersV10Config } from "@/lib/strategies/config";
 import {
   simulateMomentum10Historical,
   simulateNseMomentumHistorical,
@@ -268,6 +268,67 @@ describe("NSE Momentum historical runner", () => {
     expect(result.assumptions[0]).toContain("6 months later on 2025-07-02");
   });
 
+  it("uses the previous close as the initial ranking date and records the requested execution date", () => {
+    const market = parentNseMomentumMarketWith([
+      parentNseMomentumStock("previousLeader", {
+        twelveMonthStartClose: 50,
+        sixMonthStartClose: 80,
+        preFirstRebalanceClose: 100,
+        firstRebalanceClose: 60,
+        secondRebalanceClose: 60,
+      }),
+      parentNseMomentumStock("entryDayLeader", {
+        twelveMonthStartClose: 70,
+        sixMonthStartClose: 90,
+        preFirstRebalanceClose: 100,
+        firstRebalanceClose: 140,
+        secondRebalanceClose: 140,
+      }),
+    ]);
+    const result = simulateNseMomentum(market, {
+      requestedStartDate: day("2026-01-02"),
+      requestedEndDate: day("2026-01-10"),
+      rules: {
+        ...rulesForNseMomentumVariant("NSE Momentum", nseMomentumSixTwelveV3Config),
+        initialRankingLagSessions: 1,
+        maxPositions: 1,
+        maxEntryRank: 1,
+        maxNewPositionWeightPercent: null,
+        minVolatilityReturnCount: 20,
+        rankingMode: "rawAverage",
+        skipLikelyUpperCircuitBuys: false,
+      },
+    });
+
+    expect(result.events.find((item) => item.eventType === "INITIAL_SELECTION")?.details).toMatchObject({
+      rankingAsOfDate: "2026-01-01",
+      executionDate: "2026-01-02",
+    });
+  });
+
+  it("changes only V2's ranking window to 1M/3M volatility z-scores in two-phase V3", () => {
+    const expected = structuredClone(nseMomentumTwoPhaseV2Config);
+    delete expected.nseMomentum!.momentumMonths;
+
+    expect(nseMomentumTwoPhaseV3Config).toEqual(expected);
+    expect(rulesForNseMomentumVariant("NSE Momentum Two-Phase Allocation", nseMomentumTwoPhaseV3Config)).toMatchObject({
+      momentumMonths: undefined,
+      rankingMode: "volatilityAdjusted",
+      maxPositions: 25,
+      maxEntryRank: 25,
+      holdingRankThreshold: 50,
+      maxNewPositionWeightPercent: 5,
+      useAvailableCashForReplacements: true,
+      skipLikelyUpperCircuitBuys: true,
+      capitalDeployment: {
+        enabled: true,
+        initialPercent: 50,
+        delayedPercent: 50,
+        delayMonths: 6,
+      },
+    });
+  });
+
   it("liquidates at a 20% decline from peak, stays in cash, and re-enters next year", () => {
     const instrumentId = "protected-i";
     const prices = dateKeys("2025-01-02", "2027-01-05").map((date, index) => {
@@ -504,13 +565,13 @@ describe("NSE Momentum historical runner", () => {
     expect(capped.positions.every(p => p.entryRank! <= 25)).toBe(true);
   });
 
-  it("does not fill V3 vacancies with stocks below rank 25", () => {
+  it("fills V3 vacancies from the next executable ranks after the preferred top 25", () => {
     const market = parentNseMomentumMarketWith(Array.from({ length: 30 }, (_, i) =>
       parentNseMomentumStock(`entry${i}`, { twelveMonthStartClose: 40 + i, sixMonthStartClose: 60 + i, firstRebalanceClose: 100, secondRebalanceClose: 110 })));
     const rules = { ...rulesForNseMomentumVariant("NSE Momentum", nseMomentumSixTwelveV3Config), minVolatilityReturnCount: 20, skipLikelyUpperCircuitBuys: false, skipTopRanks: 25 };
     const result = simulateNseMomentum(market, { rules });
-    expect(result.positions).toHaveLength(0);
-    expect(result.dailyEquity.every(e => e.cash === 1_000_000)).toBe(true);
+    expect(result.initialPositionCount).toBe(5);
+    expect(result.positions.slice(0, 5).map(position => position.entryRank)).toEqual([26, 27, 28, 29, 30]);
   });
 
   it("ranks by volatility-adjusted cross-sectional z-score momentum instead of raw returns", () => {
@@ -706,7 +767,7 @@ describe("NSE Momentum historical runner", () => {
         reviewThreeMonthStartClose: 95,
         reviewClose: 160,
         volatilitySwing: 0.2,
-        extra: [["2026-02-02", 160, { high: 160, low: 160 }]],
+        extra: [["2026-02-01", 152.38], ["2026-02-02", 160, { high: 160, low: 160 }]],
       }),
       nseMomentumStock("loser", {
         oneMonthStartClose: 91,
@@ -774,13 +835,13 @@ describe("NSE Momentum historical runner", () => {
     ]);
   });
 
-  it("skips likely upper-circuit buy candidates and takes the next ranked stock", () => {
+  it("skips candidates that touch an inferred upper-circuit band and takes the next ranked stock", () => {
     const upperCircuitLeader = nseMomentumStock("upperCircuitLeader", {
       oneMonthStartClose: 60,
       threeMonthStartClose: 50,
-      endClose: 110,
+      endClose: 104,
       volatilitySwing: 0.2,
-      extra: [["2026-01-01", 100, { high: 100, low: 100 }], ["2026-01-02", 110, { high: 110, low: 110 }]],
+      extra: [["2026-01-01", 100, { high: 100, low: 100 }], ["2026-01-02", 104, { high: 105, low: 98 }]],
     });
     const nextAvailable = nseMomentumStock("nextAvailable", {
       oneMonthStartClose: 99,
@@ -789,11 +850,65 @@ describe("NSE Momentum historical runner", () => {
       volatilitySwing: 0.2,
     });
     const result = simulateNseMomentum(nseMomentumMarketWith([upperCircuitLeader, nextAvailable]), {
-      rules: { maxPositions: 1, minVolatilityReturnCount: 20 },
+      rules: { maxPositions: 1, maxEntryRank: 1, minVolatilityReturnCount: 20 },
     });
 
     expect(result.positions.map((position) => position.companyId)).toEqual(["nextAvailable"]);
-    expect(result.events.find((event) => event.eventType === "BUY_SKIPPED_UPPER_CIRCUIT")?.companyId).toBe("upperCircuitLeader");
+    expect(result.events.find((event) => event.eventType === "BUY_SKIPPED_UPPER_CIRCUIT")).toMatchObject({
+      companyId: "upperCircuitLeader",
+      details: { high: 105, previousClose: 100 },
+    });
+  });
+
+  it("records a missing execution price and continues below the preferred entry ranks", () => {
+    const unavailableLeader = nseMomentumStock("unavailableLeader", {
+      oneMonthStartClose: 60,
+      threeMonthStartClose: 50,
+      endClose: 104,
+      volatilitySwing: 0.2,
+    });
+    const availableBackup = nseMomentumStock("availableBackup", {
+      oneMonthStartClose: 99,
+      threeMonthStartClose: 98,
+      endClose: 100,
+      volatilitySwing: 0.2,
+    });
+    unavailableLeader.prices = unavailableLeader.prices.filter((row) => row.tradingDate.toISOString().slice(0, 10) !== "2026-01-02");
+
+    const result = simulateNseMomentum(nseMomentumMarketWith([unavailableLeader, availableBackup]), {
+      rules: { maxPositions: 1, maxEntryRank: 1, minVolatilityReturnCount: 20 },
+    });
+
+    expect(result.positions.map((position) => position.companyId)).toEqual(["availableBackup"]);
+    expect(result.events.find((event) => event.eventType === "BUY_SKIPPED_NO_EXECUTION_PRICE")).toMatchObject({
+      companyId: "unavailableLeader",
+      details: { rank: 1 },
+    });
+  });
+
+  it("recognizes a 2% price band even when the stock was not locked for the full session", () => {
+    const twoPercentBandLeader = nseMomentumStock("twoPercentBandLeader", {
+      oneMonthStartClose: 60,
+      threeMonthStartClose: 50,
+      endClose: 101.5,
+      volatilitySwing: 0.2,
+      extra: [["2026-01-01", 100, { high: 100, low: 100 }], ["2026-01-02", 101.5, { high: 102, low: 99 }]],
+    });
+    const nextAvailable = nseMomentumStock("twoPercentNext", {
+      oneMonthStartClose: 99,
+      threeMonthStartClose: 98,
+      endClose: 100,
+      volatilitySwing: 0.2,
+    });
+    const result = simulateNseMomentum(nseMomentumMarketWith([twoPercentBandLeader, nextAvailable]), {
+      rules: { maxPositions: 1, minVolatilityReturnCount: 20 },
+    });
+
+    expect(result.positions.map((position) => position.companyId)).toEqual(["twoPercentNext"]);
+    expect(result.events.find((event) => event.eventType === "BUY_SKIPPED_UPPER_CIRCUIT")).toMatchObject({
+      companyId: "twoPercentBandLeader",
+      details: { high: 102, previousClose: 100 },
+    });
   });
 
   it("skips new buys that do not meet absolute 1M and 3M strength filters", () => {
@@ -1012,7 +1127,7 @@ describe("Parent-style NSE Momentum historical runner", () => {
         momentumMonths,
         rebalanceFrequencyMonths: 1,
         skipLikelyUpperCircuitBuys: true,
-        likelyUpperCircuitMinGainPercent: 4.5,
+        likelyUpperCircuitMinGainPercent: 1.8,
       });
       expect(config.nseMomentum?.universeMode).toBe("nseIneOrdinaryEquity");
     }
@@ -1021,7 +1136,7 @@ describe("Parent-style NSE Momentum historical runner", () => {
   it("leaves a locked upper-circuit Top 25 allocation in cash", () => {
     const market = parentNseMomentumMarketWith([
       parentNseMomentumStock("alpha", { twelveMonthStartClose: 50, sixMonthStartClose: 80, firstRebalanceClose: 100, secondRebalanceClose: 110 }),
-      parentNseMomentumStock("locked", { twelveMonthStartClose: 60, sixMonthStartClose: 85, preFirstRebalanceClose: 90, firstRebalanceClose: 100, secondRebalanceClose: 110, upperCircuitDates: ["2026-01-02"] }),
+      parentNseMomentumStock("locked", { twelveMonthStartClose: 60, sixMonthStartClose: 85, preFirstRebalanceClose: 90, firstRebalanceClose: 99, secondRebalanceClose: 110, upperCircuitDates: ["2026-01-02"] }),
       parentNseMomentumStock("outside", { twelveMonthStartClose: 90, sixMonthStartClose: 95, firstRebalanceClose: 100, secondRebalanceClose: 110 }),
     ]);
     const result = simulateParentNseMomentum(market, {
@@ -2027,7 +2142,7 @@ function simulateNseMomentum(
     requestedEndDate: options.requestedEndDate ?? day("2026-02-20"),
     candidates: market.candidates,
     prices: market.prices,
-    rules: options.rules,
+    rules: { initialRankingLagSessions: 0, ...options.rules },
   });
 }
 

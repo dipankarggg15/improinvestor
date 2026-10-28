@@ -20,7 +20,6 @@ import {
   type HistoricalRunnerPrice,
   type HistoricalStrategyRunResult,
 } from "@/lib/strategies/historical-runner";
-
 const realSource = "UPSTOX_REAL";
 const priceLoadBatchSize = 500;
 const priceLoadConcurrency = 1;
@@ -125,7 +124,10 @@ export async function completeEarlySuperstarsHistoricalRun(input: {
           requestedEndDate: run.requestedEndDate,
           candidates,
           prices,
-          rules: rulesForNseMomentumVariant(run.strategy.name, run.strategyVersion.config),
+          rules: {
+            ...rulesForNseMomentumVariant(run.strategy.name, run.strategyVersion.config),
+            initialRankingLagSessions: 1,
+          },
         })
       : isMomentum10HistoricalStrategy(run.strategy.name)
       ? simulateMomentum10Historical({
@@ -178,7 +180,7 @@ async function loadRunnableHistoricalStrategy(
     throw new Error("Selected strategy version does not belong to this strategy.");
   }
   if (!isAutomatedHistoricalStrategy(strategy.name, strategy.versions[0]?.config)) {
-    throw new Error("Automated historical runs are currently available only for Early Superstars, Momentum 10, and NSE Momentum variants.");
+    throw new Error("This strategy does not have an automated historical runner.");
   }
 
   const version = strategy.versions[0];
@@ -514,13 +516,14 @@ export async function getHistoricalStrategyRun(input: {
       strategyVersion: true,
       positions: {
         include: {
-          company: { select: { name: true, isin: true } },
+          company: { select: { name: true, isin: true, sector: true } },
           instrument: { select: { symbol: true, exchange: true } },
         },
         orderBy: [{ entryDate: "asc" }, { createdAt: "asc" }],
       },
-      events: { orderBy: [{ eventDate: "asc" }, { createdAt: "asc" }] },
+      events: { orderBy: [{ eventDate: "asc" }, { createdAt: "asc" }], take: 500 },
       dailyEquity: { orderBy: { date: "asc" } },
+      _count: { select: { events: true } },
     },
   });
 
@@ -538,7 +541,14 @@ export async function getHistoricalStrategyRun(input: {
         })),
       })
     : new Map<string, number | null>();
-  const report = parseHistoricalRunReport(run.reportMetrics) ?? (
+  const savedReport = parseHistoricalRunReport(run.reportMetrics);
+  const reportEvents = !savedReport && run._count.events > run.events.length
+    ? await input.client.historicalStrategyEvent.findMany({
+        where: { runId: run.id },
+        orderBy: [{ eventDate: "asc" }, { createdAt: "asc" }],
+      })
+    : run.events;
+  const report = savedReport ?? (
     run.effectiveStartDate && run.effectiveEndDate
       ? buildHistoricalRunReport({
           effectiveStartDate: run.effectiveStartDate.toISOString().slice(0, 10),
@@ -552,7 +562,7 @@ export async function getHistoricalStrategyRun(input: {
             exitPrice: position.exitPrice?.toNumber() ?? null,
             quantity: position.quantity.toNumber(),
           })),
-          events: run.events.map((item) => ({
+          events: reportEvents.map((item) => ({
             positionClientId: item.positionId,
             eventType: item.eventType,
             details: item.details && typeof item.details === "object" && !Array.isArray(item.details)
@@ -602,10 +612,9 @@ export function annotateReturnIfHeldToEndPercent<TPosition extends {
 }) {
   const pricesByInstrument = new Map<string, { close: number; tradingDate: Date }[]>();
   for (const price of input.prices) {
-    pricesByInstrument.set(price.instrumentId, [
-      ...(pricesByInstrument.get(price.instrumentId) ?? []),
-      price,
-    ]);
+    const instrumentPrices = pricesByInstrument.get(price.instrumentId);
+    if (instrumentPrices) instrumentPrices.push(price);
+    else pricesByInstrument.set(price.instrumentId, [price]);
   }
   for (const prices of pricesByInstrument.values()) {
     prices.sort((left, right) => right.tradingDate.getTime() - left.tradingDate.getTime());

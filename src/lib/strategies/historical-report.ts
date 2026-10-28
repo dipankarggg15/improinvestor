@@ -169,7 +169,9 @@ function calculateCalendarReturns(points: readonly ReportEquityPoint[], effectiv
   const byYear = new Map<number, ReportEquityPoint[]>();
   for (const point of points) {
     const year = Number(point.date.slice(0, 4));
-    byYear.set(year, [...(byYear.get(year) ?? []), point]);
+    const yearPoints = byYear.get(year);
+    if (yearPoints) yearPoints.push(point);
+    else byYear.set(year, [point]);
   }
   const firstYear = Number(effectiveStartDate.slice(0, 4));
   const lastYear = Number(effectiveEndDate.slice(0, 4));

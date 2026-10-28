@@ -359,7 +359,7 @@ const nseParentMomentumMonthlyRebalanceBaseConfig = strategyConfigSchema.parse({
     parentPortfolioManagement: "retainSurvivors",
     rebalanceFrequencyMonths: 1,
     skipLikelyUpperCircuitBuys: true,
-    likelyUpperCircuitMinGainPercent: 4.5,
+    likelyUpperCircuitMinGainPercent: 1.8,
     universeMode: "nseIneOrdinaryEquity",
   },
 });
@@ -563,6 +563,14 @@ export const nseMomentumTwoPhaseV2Config = strategyConfigSchema.parse({
       delayedPercent: 50,
       delayMonths: 6,
     },
+  },
+});
+
+export const nseMomentumTwoPhaseV3Config = strategyConfigSchema.parse({
+  ...nseMomentumTwoPhaseV2Config,
+  nseMomentum: {
+    ...nseMomentumTwoPhaseV2Config.nseMomentum,
+    momentumMonths: undefined,
   },
 });
 

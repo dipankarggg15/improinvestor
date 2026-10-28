@@ -74,6 +74,40 @@ describe("createUpstoxMarketDataProvider", () => {
     expect(requests).toEqual(["https://assets.example.test/NSE.json.gz", "https://assets.example.test/BSE.json.gz"]);
   });
 
+  it("loads NSE and global indices from their official instrument masters", async () => {
+    const provider = createUpstoxMarketDataProviderCore({
+      fetch: async (input) => gzipJsonResponse(String(input).includes("global")
+        ? [{ segment: "GLOBAL_INDEX", exchange: "GLOBAL", name: "S&P", trading_symbol: "^GSPC", instrument_key: "GLOBAL_INDEX|^GSPC", country: "America", latency: "20 Seconds" }]
+        : [
+            { segment: "NSE_INDEX", exchange: "NSE", name: "Nifty 50", trading_symbol: "NIFTY", instrument_key: "NSE_INDEX|Nifty 50", instrument_type: "INDEX" },
+            { segment: "NSE_EQ", exchange: "NSE", name: "Reliance", trading_symbol: "RELIANCE", instrument_key: "NSE_EQ|INE002A01018", instrument_type: "EQ" },
+          ]),
+      indexInstrumentMasterUrls: ["https://assets.example.test/NSE.json.gz", "https://assets.example.test/global.json.gz"],
+      token: "test-token",
+    });
+
+    await expect(provider.fetchIndexInstruments?.()).resolves.toEqual([
+      {
+        country: "America",
+        exchange: "GLOBAL",
+        instrumentKey: "GLOBAL_INDEX|^GSPC",
+        latency: "20 Seconds",
+        name: "S&P",
+        segment: "GLOBAL_INDEX",
+        tradingSymbol: "^GSPC",
+      },
+      {
+        country: null,
+        exchange: "NSE",
+        instrumentKey: "NSE_INDEX|Nifty 50",
+        latency: null,
+        name: "Nifty 50",
+        segment: "NSE_INDEX",
+        tradingSymbol: "NIFTY",
+      },
+    ]);
+  });
+
   it("normalizes Upstox daily historical candles", async () => {
     const requests: string[] = [];
     const headers: Record<string, string>[] = [];
@@ -157,6 +191,65 @@ describe("createUpstoxMarketDataProvider", () => {
       previousClose: "1410.75",
       volume: BigInt(456789),
     });
+  });
+
+  it("loads multiple current quotes in one request", async () => {
+    const requests: string[] = [];
+    const provider = createUpstoxMarketDataProviderCore({
+      apiBaseUrl: "https://api.example.test/v3",
+      fetch: async (input) => {
+        requests.push(String(input));
+        return jsonResponse({ data: {
+          "NSE_EQ:AAA": { instrument_token: "NSE_EQ|INE000A01001", last_price: 101, ohlc: { close: 99 } },
+          "NSE_EQ:BBB": { instrument_token: "NSE_EQ|INE000B01001", last_price: 202, ohlc: { close: 200 } },
+        } });
+      },
+      token: "secret-token",
+    });
+
+    await expect(provider.fetchCurrentQuotes?.({ instrumentKeys: ["NSE_EQ|INE000A01001", "NSE_EQ|INE000B01001"] })).resolves.toEqual([
+      expect.objectContaining({ instrumentKey: "NSE_EQ|INE000A01001", lastPrice: "101" }),
+      expect.objectContaining({ instrumentKey: "NSE_EQ|INE000B01001", lastPrice: "202" }),
+    ]);
+    expect(requests[0]).toContain("instrument_key=NSE_EQ%7CINE000A01001%2CNSE_EQ%7CINE000B01001");
+  });
+
+  it("loads previous-session daily candles for many instruments in one request", async () => {
+    const requests: string[] = [];
+    const provider = createUpstoxMarketDataProviderCore({
+      apiBaseUrl: "https://api.example.test/v3",
+      fetch: async (input) => {
+        requests.push(String(input));
+        return jsonResponse({ data: {
+          "NSE_EQ:AAA": {
+            instrument_token: "NSE_EQ|INE000A01001",
+            last_price: 102,
+            prev_close_price: 101,
+          },
+          "NSE_EQ:BBB": {
+            instrument_token: "NSE_EQ|INE000B01001",
+            last_price: 203,
+            prev_close_price: 202,
+          },
+        } });
+      },
+      token: "secret-token",
+    });
+
+    const candles = await provider.fetchPreviousDailyCandles?.({
+      instrumentKeys: ["NSE_EQ|INE000A01001", "NSE_EQ|INE000B01001"],
+      targetDate: new Date("2026-10-27T00:00:00.000Z"),
+    });
+
+    expect(requests[0]).toContain("/market-quote/quotes?");
+    expect(candles?.map((candle) => ({
+      key: candle.instrumentKey,
+      date: candle.tradingDate.toISOString().slice(0, 10),
+      close: candle.close,
+    }))).toEqual([
+      { key: "NSE_EQ|INE000A01001", date: "2026-10-27", close: "101" },
+      { key: "NSE_EQ|INE000B01001", date: "2026-10-27", close: "202" },
+    ]);
   });
 
   it("reports missing token before authenticated Upstox requests", async () => {

@@ -10,10 +10,13 @@ import {
   runStrategyAction,
 } from "@/app/strategies/actions";
 import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { prisma } from "@/lib/db/prisma";
 import { strategyConfigForDisplay } from "@/lib/strategies/config";
 import { entryMomentumLabelForEarlySuperstarsVariant, isAutomatedHistoricalStrategy, isEarlySuperstarsHistoricalStrategy, isMomentum10HistoricalStrategy, isNseMomentumHistoricalStrategy, isParentNseMomentumHistoricalStrategy } from "@/lib/strategies/historical-run-service";
 import { listStrategyLiveHoldings } from "@/lib/strategies/live-holdings";
+import { strategyVersionDisplayName, strategyVersionPresentation } from "@/lib/strategies/version-presentation";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/ui/format";
 
 export const dynamic = "force-dynamic";
@@ -26,18 +29,30 @@ type StrategyDetailPageProps = {
 export default async function StrategyDetailPage({ params, searchParams }: StrategyDetailPageProps) {
   const { id } = await params;
   const query = await searchParams;
-  const historicalStartDate = dateParamOrDefault(query.startDate, "2026-01-02");
-  const historicalEndDate = dateParamOrDefault(query.endDate, "2026-09-07");
-  const strategy = await prisma.strategy.findUnique({
-    where: { id },
-    include: {
-      versions: { orderBy: { versionNumber: "desc" } },
-      runs: { orderBy: { runDate: "desc" }, take: 20, include: { strategyVersion: true } },
-      historicalRuns: { orderBy: { createdAt: "desc" }, take: 20, include: { strategyVersion: true } },
-    },
-  });
+  const [strategy, latestNsePrice] = await Promise.all([
+    prisma.strategy.findUnique({
+      where: { id },
+      include: {
+        versions: { orderBy: { versionNumber: "desc" } },
+        runs: { orderBy: { runDate: "desc" }, take: 20, include: { strategyVersion: true } },
+        historicalRuns: { orderBy: { createdAt: "desc" }, take: 20, include: { strategyVersion: true } },
+      },
+    }),
+    prisma.dailyPrice.findFirst({
+      where: {
+        marketDataSource: "UPSTOX_REAL",
+        instrument: { exchange: "NSE" },
+      },
+      orderBy: { tradingDate: "desc" },
+      select: { tradingDate: true },
+    }),
+  ]);
 
   if (!strategy) notFound();
+
+  const latestNseDate = latestNsePrice?.tradingDate.toISOString().slice(0, 10) ?? "2026-09-07";
+  const historicalStartDate = dateParamOrDefault(query.startDate, "2026-01-02");
+  const historicalEndDate = dateParamOrDefault(query.endDate, latestNseDate);
 
   const currentVersion = strategy.versions[0];
   const runStrategy = runStrategyAction.bind(null, strategy.id);
@@ -73,7 +88,7 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
       },
       orderBy: { openedAt: "asc" },
       include: {
-        company: { select: { name: true } },
+        company: { select: { name: true, sector: true } },
         instrument: { select: { symbol: true, exchange: true } },
       },
     }),
@@ -104,6 +119,7 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                 <div className="grid gap-3">
                   <StrategyVersionSelect
                     currentVersionId={currentVersion?.id}
+                    strategyName={strategy.name}
                     versions={strategy.versions}
                   />
                   <label className="grid gap-2 text-sm font-medium">
@@ -120,6 +136,7 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                     <input
                       className="h-11 rounded-md border border-[var(--border)] px-3"
                       defaultValue={historicalEndDate}
+                      max={latestNseDate}
                       name="endDate"
                       type="date"
                     />
@@ -133,7 +150,7 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                   Run Strategy
                 </ConfirmSubmitButton>
                 <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-                  Uses UPSTOX_REAL close/volume history only.
+                  Uses UPSTOX_REAL close/volume history through {formatDate(latestNsePrice?.tradingDate ?? new Date(`${latestNseDate}T00:00:00.000Z`))}.
                 </p>
               </form>
             ) : (
@@ -141,6 +158,7 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                 <div className="grid gap-3">
                   <StrategyVersionSelect
                     currentVersionId={currentVersion?.id}
+                    strategyName={strategy.name}
                     versions={strategy.versions}
                   />
                   <label className="grid gap-2 text-sm font-medium">
@@ -207,7 +225,13 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                         {run.effectiveStartDate && run.effectiveEndDate ? `${formatDate(run.effectiveStartDate)} to ${formatDate(run.effectiveEndDate)}` : "-"}
                       </td>
                       <td className="py-3 pr-3">{entryMomentumLabel ?? "-"}</td>
-                      <td className="py-3 pr-3">V{run.strategyVersion.versionNumber}</td>
+                      <td className="max-w-[260px] py-3 pr-3 text-xs leading-5">
+                        {strategyVersionDisplayName({
+                          strategyName: strategy.name,
+                          versionNumber: run.strategyVersion.versionNumber,
+                          storedLabel: run.strategyVersion.label,
+                        })}
+                      </td>
                       <td className="py-3 pr-3">{formatPercent(run.totalReturnPercent?.toNumber())}</td>
                       <td className="py-3 pr-3">{formatPercent(run.cagrPercent?.toNumber())}</td>
                       <td className="py-3 pr-3">{run.tradeCount}</td>
@@ -236,11 +260,20 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
         <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Versions</h2>
           <div className="mt-4 grid gap-2 text-sm">
-            {strategy.versions.map((version) => (
-              <div className="rounded-md bg-[var(--panel-soft)] px-3 py-2" key={version.id}>
-                <span>V{version.versionNumber} {version.label ? `- ${version.label}` : ""}</span>
-              </div>
-            ))}
+            {strategy.versions.map((version) => {
+              const presentation = strategyVersionPresentation({
+                strategyName: strategy.name,
+                versionNumber: version.versionNumber,
+                storedLabel: version.label,
+                storedNotes: version.notes,
+              });
+              return (
+                <div className="rounded-md bg-[var(--panel-soft)] px-3 py-3" key={version.id}>
+                  <p className="font-semibold">V{version.versionNumber} · {presentation.label}</p>
+                  {presentation.summary ? <p className="mt-1 text-xs leading-5 text-[var(--muted)]">{presentation.summary}</p> : null}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -266,8 +299,8 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                 {currentHoldings.map((holding) => (
                   <tr className="border-t border-[var(--border)]" key={holding.episodeId}>
                     <td className="py-3 pr-3">
-                      <span className="font-medium">{holding.companyName}</span>
-                      <span className="ml-2 text-xs text-[var(--muted)]">{holding.symbol} {holding.exchange}</span>
+                      <StockChartLink className="font-medium text-[var(--accent)] hover:underline" exchange={holding.exchange} symbol={holding.symbol}>{holding.companyName}</StockChartLink>
+                      <span className="ml-2 text-xs text-[var(--muted)]">{holding.symbol} {holding.exchange} · </span><SectorStatus className="text-xs text-[var(--muted)]" sector={holding.sector} />
                     </td>
                     <td className="py-3 pr-3">{formatDate(holding.entryDate)}</td>
                     <td className="py-3 pr-3">{formatCurrency(holding.averageEntryPrice.toNumber())}</td>
@@ -297,8 +330,9 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
                   key={episode.id}
                 >
                   <span>
-                    <span className="font-medium">{episode.company.name}</span>
+                    <StockChartLink className="font-medium text-[var(--accent)] hover:underline" exchange={episode.instrument.exchange} symbol={episode.instrument.symbol}>{episode.company.name}</StockChartLink>
                     <span className="ml-2 text-xs text-[var(--muted)]">{episode.instrument.symbol} {episode.instrument.exchange}</span>
+                    <span className="ml-2 text-xs text-[var(--muted)]">· </span><SectorStatus className="text-xs text-[var(--muted)]" sector={episode.company.sector} />
                   </span>
                   <ConfirmSubmitButton
                     className="h-9 rounded-md border border-[var(--border)] px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
@@ -367,9 +401,11 @@ export default async function StrategyDetailPage({ params, searchParams }: Strat
 
 function StrategyVersionSelect({
   currentVersionId,
+  strategyName,
   versions,
 }: {
   readonly currentVersionId?: string;
+  readonly strategyName: string;
   readonly versions: readonly {
     readonly id: string;
     readonly versionNumber: number;
@@ -387,7 +423,11 @@ function StrategyVersionSelect({
       >
         {versions.map((version) => (
           <option key={version.id} value={version.id}>
-            V{version.versionNumber}{version.label ? ` - ${version.label}` : ""}
+            {strategyVersionDisplayName({
+              strategyName,
+              versionNumber: version.versionNumber,
+              storedLabel: version.label,
+            })}
           </option>
         ))}
       </select>

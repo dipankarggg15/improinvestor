@@ -35,5 +35,8 @@ export function createMockMarketDataProvider(): MarketDataProvider {
         volume: latest.volume,
       };
     },
+    async fetchCurrentQuotes(input) {
+      return Promise.all(input.instrumentKeys.map((instrumentKey) => this.fetchCurrentQuote({ instrumentKey })));
+    },
   };
 }

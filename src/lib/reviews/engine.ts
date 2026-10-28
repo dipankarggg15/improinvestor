@@ -77,6 +77,15 @@ function isMomentum10Strategy(name: string) {
 export function momentum10HoldingConfig(): StrategyConfig {
   return {
     ...momentum10V1Config,
+    eligibility: {
+      ...momentum10V1Config.eligibility,
+      returns: {
+        ...momentum10V1Config.eligibility.returns,
+        // The 1M return band is an entry rule. Existing holdings are ranked
+        // across the full core-qualified universe during scheduled reviews.
+        return1M: undefined,
+      },
+    },
     ranking: { metric: "return1M", direction: "desc" },
     selection: { maxPositions: 999_999 },
   };
@@ -330,7 +339,9 @@ function rankedUniverse(candidates: readonly EvaluatedStrategyCandidate[], metri
 function groupPrices(prices: readonly StrategyPricePoint[]) {
   const map = new Map<string, StrategyPricePoint[]>();
   for (const price of prices) {
-    map.set(price.instrumentId, [...(map.get(price.instrumentId) ?? []), price]);
+    const instrumentPrices = map.get(price.instrumentId);
+    if (instrumentPrices) instrumentPrices.push(price);
+    else map.set(price.instrumentId, [price]);
   }
   for (const values of map.values()) {
     values.sort((left, right) => left.tradingDate.getTime() - right.tradingDate.getTime());

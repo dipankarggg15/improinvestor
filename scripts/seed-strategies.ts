@@ -18,6 +18,7 @@ import {
   nseMomentumSixTwelveV4Config,
   nseMomentumTwoPhaseV1Config,
   nseMomentumTwoPhaseV2Config,
+  nseMomentumTwoPhaseV3Config,
   nseMomentumV1Config,
   nseMomentumWinnersV1Config,
   nseMomentumWinnersV7Config,
@@ -27,10 +28,15 @@ import {
   nseMomentumWinnersV11Config,
 } from "../src/lib/strategies/config";
 import { assertStrategyVersionConfigEditable } from "../src/lib/strategies/versioning";
+import { nseMomentumVersionMetadata } from "../src/lib/strategies/version-presentation";
 
 const prisma = new PrismaClient();
 
 async function main() {
+  if (process.argv.includes("--nse-momentum-labels-only")) {
+    await syncNseMomentumVersionMetadata();
+    return;
+  }
   if (process.argv.includes("--nse-momentum-two-phase-only")) {
     await seedNseMomentumTwoPhase();
     return;
@@ -41,6 +47,7 @@ async function main() {
   }
   if (process.argv.includes("--six-twelve-ine-universe-only")) {
     await seedSixTwelveIneUniverseVersions();
+    await syncNseMomentumVersionMetadata();
     return;
   }
   if (process.argv.includes("--nse-momentum-winners-v10-only")) {
@@ -61,6 +68,7 @@ async function main() {
   }
   if (process.argv.includes("--nse-momentum-v3-only")) {
     await seedNseMomentumV3();
+    await syncNseMomentumVersionMetadata();
     return;
   }
   if (process.argv.includes("--survivors-only")) {
@@ -74,19 +82,19 @@ async function main() {
     description:
       "Ranks NSE stocks by volatility-adjusted 1-month and 3-month momentum z-scores, buys the Top 20, and keeps monthly holdings that remain inside the Top 50.",
     config: nseMomentumV1Config,
-    label: "V1 NSE Momentum",
-    notes: "NSE Momentum V1 using price-only volatility-adjusted 1M/3M cross-sectional z-score ranking.",
+    label: nseMomentumVersionMetadata[1].label,
+    notes: nseMomentumVersionMetadata[1].notes,
   });
   await seedStrategyVersion({
     strategyName: "NSE Momentum",
     versionNumber: 2,
     config: nseMomentumStrengthV2Config,
-    label: "V2 Strength Filter",
-    notes:
-      "NSE Momentum V2 keeps the same ranking and Top 50 review rule, but new buys/replacements require 1M return >= 5% and 3M return >= 50%. Accumulated cash plus sale proceeds may be redeployed, with each new position capped at 5% of portfolio value.",
+    label: nseMomentumVersionMetadata[2].label,
+    notes: nseMomentumVersionMetadata[2].notes,
   });
   await seedNseMomentumV3();
   await seedNseMomentumV4();
+  await syncNseMomentumVersionMetadata();
   await seedNseMomentumLossProtection();
   await seedNseMomentumTwoPhase();
   await seedStrategy({
@@ -118,6 +126,13 @@ async function seedNseMomentumTwoPhase() {
     config: nseMomentumTwoPhaseV2Config,
     label: "V2 50% Now / 50% After Six Months",
     notes: "Identical to V1 except the second independent 50% sleeve starts exactly six months after the first sleeve's actual entry date, using the next available NSE trading day. The 6M/12M volatility-adjusted ranking, Top 25 entry, Top 50 retention, monthly review, INE ordinary-equity universe, 5% new-position cap, cash redeployment, and upper-circuit protection rules are unchanged.",
+  });
+  await seedStrategyVersion({
+    strategyName: "NSE Momentum Two-Phase Allocation",
+    versionNumber: 3,
+    config: nseMomentumTwoPhaseV3Config,
+    label: "V3 1M + 3M Volatility Z-Score / Six-Month Tranches",
+    notes: "Identical to V2 except both independent sleeves rank eligible NSE INE ordinary equities by the average of volatility-adjusted 1M and 3M cross-sectional z-scores. The 50% immediate and 50% after six months deployment, Top 25 entry, Top 50 retention, monthly review, 5% new-position cap, cash redeployment, and upper-circuit protection rules are unchanged.",
   });
 }
 
@@ -192,10 +207,10 @@ async function seedNseMomentumV3() {
       data: {
         strategyId: strategy.id,
         versionNumber: 3,
-        label: "V3 6M + 12M Top 25 / Hold Top 50",
+        label: nseMomentumVersionMetadata[3].label,
         effectiveFrom: new Date("2023-01-02T00:00:00.000Z"),
         config,
-        notes: "Uses 50% z6M + 50% z12M volatility-adjusted ranking for both entry and monthly review. New buys must rank <=25; maximum 25 holdings. Existing holdings remain untouched at rank <=50; sell rank >50 or unrankable holdings. Removes V2's 1M/3M absolute strength filters. Keeps V2 cash redeployment, 5% new-position cap, execution and upper-circuit handling. Prior versions are unchanged.",
+        notes: nseMomentumVersionMetadata[3].notes,
       },
     });
     console.log(`Created NSE Momentum V${version.versionNumber}: ${version.id}`);
@@ -207,9 +222,26 @@ async function seedNseMomentumV4() {
     strategyName: "NSE Momentum",
     versionNumber: 4,
     config: nseMomentumSixTwelveV4Config,
-    label: "V4 6M + 12M Top 25 / Hold Top 50 - INE Equities",
-    notes: "Identical to V3 except the backtest universe is restricted to active NSE instruments whose keys begin NSE_EQ|INE, with identifiable ETFs, indices, debt, preference shares, InvITs, REITs, and other non-ordinary-equity names excluded. The volatility-adjusted 6M/12M z-score formula, Top 25 entry, Top 50 retention, monthly review, allocation, and execution rules are unchanged. Earlier versions and saved runs remain reproducible.",
+    label: nseMomentumVersionMetadata[4].label,
+    notes: nseMomentumVersionMetadata[4].notes,
   });
+}
+
+async function syncNseMomentumVersionMetadata() {
+  const strategy = await prisma.strategy.findUnique({
+    where: { name: "NSE Momentum" },
+    select: { id: true },
+  });
+  if (!strategy) throw new Error("NSE Momentum must be seeded before its version metadata can be synchronized.");
+
+  for (const [versionNumberText, metadata] of Object.entries(nseMomentumVersionMetadata)) {
+    const versionNumber = Number(versionNumberText);
+    const result = await prisma.strategyVersion.updateMany({
+      where: { strategyId: strategy.id, versionNumber },
+      data: { label: metadata.label, notes: metadata.notes },
+    });
+    if (result.count > 0) console.log(`Updated NSE Momentum V${versionNumber} metadata: ${metadata.label}`);
+  }
 }
 
 async function seedNseMomentumWinnersV7() {

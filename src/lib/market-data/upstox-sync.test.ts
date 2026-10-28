@@ -80,6 +80,63 @@ describe("Upstox real-market sync", () => {
     expect(client.state.dailyPrices).toHaveLength(4);
   });
 
+  it("updates a changed Upstox instrument key without duplicating the exchange symbol", async () => {
+    const client = createFakePrisma();
+    client.state.companies.push({ id: "company-1", isin: "INE002A01018", name: "Reliance", marketDataSource: "UPSTOX_REAL" });
+    client.state.instruments.push({
+      id: "instrument-1",
+      companyId: "company-1",
+      exchange: "NSE",
+      symbol: "RELIANCE",
+      instrumentKey: "NSE_EQ|OLD_KEY",
+      marketDataSource: "UPSTOX_REAL",
+    });
+
+    const result = await runUpstoxRealMarketSync({
+      client: client as never,
+      provider: providerWith({
+        instruments: [instrument({ exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|INE002A01018", isin: "INE002A01018" })],
+      }),
+      mode: "backfill",
+      startDate: new Date("2026-09-07"),
+      endDate: new Date("2026-09-07"),
+    });
+
+    expect(result.failed).toBe(0);
+    expect(client.state.instruments).toHaveLength(1);
+    expect(client.state.instruments[0]?.instrumentKey).toBe("NSE_EQ|INE002A01018");
+  });
+
+  it("reconciles separate rows that already own the current symbol and instrument key", async () => {
+    const client = createFakePrisma();
+    client.state.companies.push({ id: "company-1", isin: "INE002A01018", name: "Reliance", marketDataSource: "UPSTOX_REAL" });
+    client.state.instruments.push(
+      { id: "instrument-symbol", companyId: "company-1", exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|OLD_KEY", marketDataSource: "UPSTOX_REAL" },
+      { id: "instrument-key", companyId: "company-1", exchange: "NSE", symbol: "RELIANCE-OLD", instrumentKey: "NSE_EQ|INE002A01018", marketDataSource: "UPSTOX_REAL" },
+    );
+
+    const result = await runUpstoxRealMarketSync({
+      client: client as never,
+      provider: providerWith({
+        instruments: [instrument({ exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|INE002A01018", isin: "INE002A01018" })],
+      }),
+      mode: "backfill",
+      startDate: new Date("2026-09-07"),
+      endDate: new Date("2026-09-07"),
+    });
+
+    expect(result.failed).toBe(0);
+    expect(client.state.instruments.find((row) => row.id === "instrument-symbol")).toMatchObject({
+      symbol: "RELIANCE",
+      instrumentKey: "NSE_EQ|INE002A01018",
+    });
+    expect(client.state.instruments.find((row) => row.id === "instrument-key")).toMatchObject({
+      active: false,
+      symbol: "__SUPERSEDED__instrument-key",
+      instrumentKey: "__SUPERSEDED__instrument-key",
+    });
+  });
+
   it("incremental sync starts after the latest stored candle", async () => {
     const client = createFakePrisma();
     client.state.dailyPrices.push({
@@ -189,7 +246,7 @@ function candle(instrumentKey: string, date: string): ProviderDailyCandle {
 function createFakePrisma() {
   const state = {
     companies: [] as Array<{ id: string; isin: string; name: string; marketDataSource: string }>,
-    instruments: [] as Array<{ id: string; companyId: string; exchange: string; symbol: string; instrumentKey: string; marketDataSource: string }>,
+    instruments: [] as Array<{ id: string; companyId: string; exchange: string; symbol: string; instrumentKey: string; marketDataSource: string; active?: boolean }>,
     dailyPrices: [] as Array<{ instrumentId: string; tradingDate: Date; marketDataSource: string }>,
     dataSync: [] as Array<{ id: string; data: unknown }>,
   };
@@ -210,16 +267,17 @@ function createFakePrisma() {
       },
     },
     instrument: {
-      async upsert(input: { where: { exchange_instrumentKey: { exchange: string; instrumentKey: string } }; update: { companyId: string; symbol: string; marketDataSource: string }; create: { companyId: string; exchange: string; symbol: string; instrumentKey: string; marketDataSource: string } }) {
-        const key = input.where.exchange_instrumentKey;
-        const existing = state.instruments.find((instrument) => instrument.exchange === key.exchange && instrument.instrumentKey === key.instrumentKey);
-        if (existing) {
-          existing.companyId = input.update.companyId;
-          existing.symbol = input.update.symbol;
-          existing.marketDataSource = input.update.marketDataSource;
-          return { id: existing.id, instrumentKey: existing.instrumentKey };
-        }
-        const row = { id: `instrument-${state.instruments.length + 1}`, ...input.create };
+      async findFirst(input: { where: { exchange: string; instrumentKey?: string; symbol?: string } }) {
+        return state.instruments.find((instrument) => instrument.exchange === input.where.exchange &&
+          (input.where.instrumentKey ? instrument.instrumentKey === input.where.instrumentKey : instrument.symbol === input.where.symbol)) ?? null;
+      },
+      async update(input: { where: { id: string }; data: { companyId: string; symbol: string; instrumentKey: string; marketDataSource: string } }) {
+        const existing = state.instruments.find((instrument) => instrument.id === input.where.id)!;
+        Object.assign(existing, input.data);
+        return { id: existing.id, instrumentKey: existing.instrumentKey };
+      },
+      async create(input: { data: { companyId: string; exchange: string; symbol: string; instrumentKey: string; marketDataSource: string } }) {
+        const row = { id: `instrument-${state.instruments.length + 1}`, ...input.data };
         state.instruments.push(row);
         return { id: row.id, instrumentKey: row.instrumentKey };
       },
