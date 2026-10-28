@@ -31,7 +31,7 @@
     "schema:watchlists": "tsx scripts/apply-watchlist-schema.ts",
     "schema:sectors": "tsx scripts/apply-sector-universe-schema.ts",
     "schema:fundamentals": "tsx scripts/apply-fundamentals-schema.ts",
-    "schema:online:all": "npm run schema:watchlists && npm run schema:sectors && npm run schema:fundamentals && tsx scripts/apply-return-experiment-schema.ts && npm run schema:historical-strategy",
+    "schema:online:all": "npm run schema:watchlists && npm run schema:sectors && npm run schema:fundamentals && tsx scripts/apply-return-experiment-schema.ts",
     "measure:market-storage": "tsx scripts/measure-market-storage.ts",
     "validate:real-market": "tsx scripts/validate-real-market-import.ts",
     "cleanup:dummy-data": "tsx scripts/cleanup-dummy-data.ts",
