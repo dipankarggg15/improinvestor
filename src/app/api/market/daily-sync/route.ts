@@ -5,7 +5,9 @@ import { prisma } from "@/lib/db/prisma";
 import { ensureDailyMarketDataSync } from "@/lib/market-data/daily-sync";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 900;
+// Vercel Hobby deployments allow a maximum function duration of 300 seconds.
+// The desktop app is not subject to this hosted-function limit.
+export const maxDuration = 300;
 
 export async function POST() {
   await requireOwner();
