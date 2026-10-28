@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { prisma } from "@/lib/db/prisma";
 import { getPositionEpisodeDetail } from "@/lib/exits/service";
 import { formatCurrency, formatDate, formatPercent, formatQuantity } from "@/lib/ui/format";
@@ -21,9 +23,9 @@ export default async function EpisodePage({ params }: EpisodePageProps) {
       <div className="max-w-full min-w-0 max-w-7xl space-y-6">
         <div>
           <p className="text-sm font-medium text-[var(--accent)]">REAL MARKET DATA</p>
-          <h1 className="mt-2 text-3xl font-semibold">{episode.company.name}</h1>
+          <h1 className="mt-2 text-3xl font-semibold"><StockChartLink className="text-[var(--accent)] hover:underline" exchange={episode.instrument.exchange} symbol={episode.instrument.symbol}>{episode.company.name}</StockChartLink></h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            {episode.instrument.symbol} ({episode.instrument.exchange}) in {episode.portfolio.name}. Episode status: {episode.status}.
+            {episode.instrument.symbol} ({episode.instrument.exchange}) · <SectorStatus sector={episode.company.sector} /> · {episode.portfolio.name}. Episode status: {episode.status}.
           </p>
         </div>
 

@@ -301,7 +301,9 @@ function groupPrices(prices: StrategyPricePoint[]) {
   const result = new Map<string, StrategyPricePoint[]>();
 
   for (const price of prices) {
-    result.set(price.instrumentId, [...(result.get(price.instrumentId) ?? []), price]);
+    const instrumentPrices = result.get(price.instrumentId);
+    if (instrumentPrices) instrumentPrices.push(price);
+    else result.set(price.instrumentId, [price]);
   }
 
   for (const points of result.values()) {

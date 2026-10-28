@@ -1,43 +1,43 @@
 # ImproInvestor
 
-ImproInvestor is a private personal Indian equities strategy research workspace.
+ImproInvestor is a private, single-owner Indian-equities research workspace. It combines stored Upstox market history, momentum discovery, immutable strategy versions, automated historical simulations, counterfactual research, a manual trade ledger, portfolio valuation, and exit analytics.
 
-The current version includes a synthetic market-data system, Custom Return Screener, historical strategy-run engine with immutable strategy versions, synthetic portfolio/trade accounting, immutable strategy review recommendations, and single-owner Supabase authentication. It intentionally does not include real provider integrations, automatic trading/order execution, or background review automation.
+The application is a research and record-keeping tool. It does not place broker orders or automatically turn strategy signals into trades.
+
+## Product Areas
+
+- **Discover**: current or historical NSE momentum rankings, multi-touch support-zone swing setups, interactive charts for every stored instrument, a custom historical screener, and saved return studies.
+- **Strategies**: immutable strategy versions, historical simulations, stored assumptions, positions, event logs, and equity history.
+- **Counterfactual Lab**: parameter experiments against the isolated synthetic development dataset.
+- **Portfolio**: manually recorded BUY/SELL trades, open and closed positions, reviews, and performance analytics.
+- **Market data**: Upstox instrument and EOD candle ingestion with explicit `UPSTOX_REAL` source labels.
+
+Historical simulation results currently use stored, unadjusted daily prices. Each run records its assumptions and limitations, including missing corporate actions, possible survivorship bias, execution-price assumptions, and excluded trading costs or taxes. Treat results as research evidence, not expected future returns.
 
 ## Stack
 
-- Next.js App Router
-- TypeScript
-- Tailwind CSS
-- PostgreSQL
-- Prisma ORM
-- ESLint
-- npm
+- Next.js App Router, React, TypeScript, and Tailwind CSS
+- PostgreSQL and Prisma ORM
+- Supabase Auth with a single-owner email allowlist
+- Vitest and ESLint
 
-## Install Dependencies
+## Local Setup
+
+Install dependencies and copy the environment template:
 
 ```bash
 npm install
-```
-
-## Configure Environment Variables
-
-Copy the example file and fill in local values:
-
-```bash
 cp .env.example .env
 ```
 
-Required when using Prisma:
+Required database variables:
 
 ```bash
 DATABASE_URL="postgresql://USER:PASSWORD@TRANSACTION-POOLER-HOST:6543/postgres?pgbouncer=true&connection_limit=1"
 DIRECT_URL="postgresql://USER:PASSWORD@DIRECT-HOST:5432/postgres"
 ```
 
-For Supabase on Vercel/serverless, use the transaction pooler connection string for `DATABASE_URL` and the direct connection string for `DIRECT_URL`. Prisma Client uses `DATABASE_URL` for normal application queries, while Prisma Migrate uses `DIRECT_URL` through `directUrl` in `prisma/schema.prisma`.
-
-Required for authentication:
+Required authentication variables:
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=
@@ -45,209 +45,109 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 OWNER_EMAIL=
 ```
 
-Only the authenticated Supabase Auth user whose email matches `OWNER_EMAIL` can access the application. Do not use a service-role key in any `NEXT_PUBLIC_*` variable.
-
-Market-data provider configuration:
+Real-market ingestion uses:
 
 ```bash
-UPSTOX_ACCESS_TOKEN=
-MARKET_DATA_PROVIDER=mock
-SYNTHETIC_MARKET_SEED=20260103
+UPSTOX_ANALYTICS_TOKEN=
 ```
 
-Never commit `.env` files. They are ignored by Git.
+`LOCAL_AUTH_BYPASS=true` may be used only in non-production local development. Never expose a Supabase service-role key through a `NEXT_PUBLIC_*` variable, and never commit `.env` files.
 
-## Production Privacy
-
-ImproInvestor is a single-owner private app. Protected routes redirect unauthenticated requests to `/login`, and every durable Server Action calls the shared owner guard before writing data.
-
-For an extra outer layer, Vercel Deployment Protection can also be enabled, but it should not replace application authentication.
-
-## Run Locally
-
-```bash
-npm run dev
-```
-
-Then open the local URL printed by Next.js, usually:
-
-```text
-http://localhost:3000
-```
-
-## Initialize Prisma And Database
-
-Generate the Prisma client:
+Generate Prisma Client, apply migrations, seed strategy definitions, and start the app:
 
 ```bash
 npm run prisma:generate
-```
-
-Validate the Prisma setup:
-
-```bash
-npx prisma validate
-```
-
-Run migrations:
-
-```bash
 npm run prisma:migrate
+npm run seed:strategies
+npm run dev
 ```
 
-The current Prisma schema contains the historical market-data model plus strategy identity, immutable strategy versions, historical strategy runs, stored candidate decision snapshots, portfolios, immutable trade ledger records, and stored review snapshots. It intentionally does not include authentication, broker order execution, background scheduling, or automated execution.
+The local app normally runs at [http://localhost:3000](http://localhost:3000).
 
-## Load Development Seed Data
+## Market Data
 
-After your PostgreSQL database is configured and migrations are applied, rebuild the deterministic synthetic market:
+Import or incrementally update stored Upstox instruments and daily candles with:
+
+```bash
+npm run sync:upstox
+```
+
+Enrich every stored Upstox company with the sector returned by the Upstox Company Profile API. Existing sectors are cached, so normal runs request only companies that still need classification:
+
+```bash
+npm run sync:sectors
+```
+
+Use `npm run sync:sectors -- --refresh=true` for an occasional full refresh. The older Nifty 500-only fallback remains available as `npm run sync:sectors:nifty500`.
+
+Validate the imported real-market dataset with:
+
+```bash
+npm run validate:real-market
+```
+
+The project still contains a deterministic synthetic dataset for isolated development and legacy counterfactual tests. Rebuilding it is destructive to synthetic rows and is guarded against production use:
 
 ```bash
 npm run seed:market
 ```
 
-This command clears and rebuilds synthetic companies, instruments, fundamentals, and daily prices. It is guarded by an environment safety check and refuses to run with `NODE_ENV=production`.
+Do not mix synthetic and real records in a production database. Use `npm run cleanup:dummy-data` when completing a real-data migration, after reviewing that script's scope.
 
-`npm run db:seed` points to the same synthetic market seed command.
+## Strategy Research
 
-Seed the initial strategy definitions:
+Active strategies are seeded with:
 
 ```bash
 npm run seed:strategies
 ```
 
-This creates:
+Strategy versions are immutable once used. Historical simulations store the exact version, requested and effective dates, portfolio statistics, position history, decision events, daily equity, assumptions, and limitations used for the result.
 
-- Momentum 10 V1
-- Early Superstars V1
+### Online database limits
 
-If a V1 strategy version has already been used by a historical run, the seed preserves its configuration instead of rewriting it.
+The online deployment intentionally stores less historical market data than the desktop installation. Application features and strategy rules are kept in parity, but backtests are limited to the dates actually stored online. The strategy page displays that database range and constrains requested dates accordingly. Strategies that require momentum lookback may begin later than the first stored date, or may be unavailable until sufficient history has accumulated.
 
-Run historical strategy verification against the configured PostgreSQL database:
-
-```bash
-npm run verify:strategies
-```
-
-Seed synthetic development portfolios and deterministic demo trades:
+Before deploying features that use watchlists, sectors, or fundamentals to an existing online database, apply the matching additive schema scripts:
 
 ```bash
-npm run seed:portfolio
+npm run schema:watchlists
+npm run schema:sectors
+npm run schema:fundamentals
 ```
 
-This creates one ₹10,00,000 synthetic portfolio for each seeded strategy. The seed is safe to rerun: it replaces only trades labelled with the `PHASE5_DEMO:` prefix and does not rebuild market data or strategy runs.
-
-Seed stored strategy review snapshots:
-
-```bash
-npm run seed:reviews
-```
-
-This creates deterministic manual review records for the synthetic portfolios. A review recommendation never creates a trade.
-
-## Synthetic Market
-
-The synthetic market is generated by `src/lib/synthetic-market/generator.ts` with fixed seed `20260103`.
-
-It creates approximately 300 fictional Indian companies, mostly NSE-listed, with some BSE-only and some dual-listed companies. Dual-listed companies remain one `Company` with multiple `Instrument` rows.
-
-Synthetic behavior profiles include:
-
-- steady compounders
-- sideways stocks
-- gradual decliners
-- high-volatility stocks
-- momentum runners
-- momentum-then-crash stocks
-- breakout/rally stocks
-- deep-correction-and-recovery stocks
-- short-lived momentum spikes
-- long-duration winners
-- severe losers
-
-Market regimes:
-
-- 2023-01-02 to 2023-09-29: normal mixed market
-- 2023-10-02 to 2024-07-31: broad bullish period
-- 2024-08-01 to 2025-02-28: market correction
-- 2025-03-03 to 2025-12-31: recovery
-
-Daily data is generated for Monday-Friday trading days only. Real Indian exchange holidays are not modeled yet.
-
-Company fundamentals are generated as periodic historical snapshots. Historical screens use the most recent fundamentals snapshot on or before the screen date, which avoids look-ahead bias.
-
-## Custom Return Screener
-
-The `/screener` page ranks companies by point-to-point return using server-side calculations. It prefers NSE instruments when a company has both NSE and BSE listings, and falls back to BSE when only BSE exists.
-
-Date behavior:
-
-- Start: first available trading-day close on or after the requested start date
-- End: last available trading-day close on or before the requested end date
-- Invalid ranges where end date is before start date are rejected
-
-Liquidity uses rupee traded value, not share volume:
-
-```text
-daily traded value = close * volume
-average traded value = average daily traded value over the requested period
-```
-
-The UI clearly labels results as `SYNTHETIC MARKET DATA`.
-
-## Provider Abstraction
-
-Market data is consumed through the generic `MarketDataProvider` interface. The current `MockMarketDataProvider` returns deterministic synthetic instruments and candles. The Upstox adapter remains a placeholder and makes no real API calls.
-
-Later, Upstox can replace the mock provider by implementing the same interface without changing screener or strategy calculations.
-
-## Strategy Engine
-
-The `/strategies` page lists seeded strategies and links to detail pages. Each detail page can run the current strategy version for a selected historical date. Run result pages display stored `StrategyCandidateSnapshot` rows rather than recalculating old decisions from current data.
-
-Current V1 strategies:
-
-- Momentum 10: market cap `> ₹500 Cr`, 3M return `> 50%`, average traded value `>= ₹5 Cr/day`, debt/equity `< 2`, ranked by 1M return ascending, max 10 selections.
-- Early Superstars: market cap `>= ₹2,000 Cr`, average traded value `>= ₹5 Cr/day`, debt/equity `< 2`, 1W return `> 5%`, 1M return `< 50%`, 3M return `< 50%`, ranked by 1W return descending, max 10 selections.
-
-Liquidity for these strategies uses the average daily traded value over the configured lookback period. V1 uses a one-calendar-month lookback ending on the run date, with no future volume data included.
+A strategy signal is not an executed trade. Trades enter the portfolio ledger only after a user records them explicitly.
 
 ## Portfolio Accounting
 
-The `/portfolio` page values strategy portfolios from immutable trades. Strategy selections do not become positions automatically; a selected candidate only affects a portfolio after an actual `Trade` is recorded.
-
-V1 accounting rules:
-
-- Initial capital establishes opening cash.
-- BUY cash impact is `quantity * price + fees`.
-- SELL cash impact is `quantity * price - fees`.
+- BUY cash impact is `quantity × price + fees`.
+- SELL cash impact is `quantity × price - fees`.
 - BUY fees are included in weighted-average acquisition cost.
 - SELL fees reduce realized proceeds.
-- No margin, leverage, short selling, negative cash, or overselling.
-- Current positions are derived from the trade ledger, not persisted as independent truth.
-- Historical valuation includes only trades and synthetic closing prices available on or before the valuation date.
+- Positions are derived from the immutable trade ledger.
+- Short selling, overselling, leverage, and negative cash are rejected.
+- Review recommendations never create trades automatically.
 
-## Strategy Reviews
+## Verification
 
-The review engine evaluates open positions and stores immutable `StrategyReviewPositionSnapshot` rows. Review decisions are recommendations only:
+Run the normal local quality checks before committing:
 
-```text
-review recommendation != executed trade
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm run build
 ```
 
-Momentum 10 V1 scheduled review rules:
+Additional data and strategy checks are available through:
 
-- One-calendar-month grace period from first actual BUY date.
-- During grace period, normal rank/core exits are HOLD.
-- After grace, core qualification is market cap `> ₹500 Cr`, 3M return `> 50%`, average traded value `>= ₹5 Cr/day`, debt/equity `< 2`.
-- Holding rank is 1M return descending, separate from entry ranking.
-- Rank `<= 30` is HOLD; rank `31+` is SELL.
+```bash
+npm run verify:market
+npm run verify:strategies
+npm run validate:upstox
+npm run validate:upstox-sample
+```
 
-Early Superstars V1 review rules:
+## Privacy and Deployment
 
-- Day 1 is the first actual BUY date of the current continuous position.
-- Day 1-90 is Phase 1; Day 91+ is Phase 2.
-- Emergency stop uses weighted-average acquisition cost of the current open position, including BUY fees. It is not trailing and does not use the strategy signal price.
-- Emergency SELL triggers when the available close is `<= 85%` of weighted-average acquisition cost.
-- Phase 1 scheduled reviews rank 1M return descending against structural filters only; Top 50 is HOLD.
-- Phase 2 scheduled reviews rank exact purchase-date-to-review-date return descending against structural filters only; Top 30 is HOLD.
-- Early Superstars entry-only return rules are not exit rules.
+Protected pages and APIs require a Supabase user whose email matches `OWNER_EMAIL`. Durable Server Actions also apply the shared owner guard before writing data. Vercel Deployment Protection can provide an additional outer layer, but it should not replace application authentication.

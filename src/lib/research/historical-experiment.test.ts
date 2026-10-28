@@ -49,6 +49,13 @@ function fakeClient(companies: readonly FakeCompany[], prices: readonly FakePric
       },
     },
     dailyPrice: {
+      aggregate: async () => ({
+        _max: {
+          tradingDate: prices.length > 0
+            ? new Date(Math.max(...prices.map((item) => item.tradingDate.getTime())))
+            : null,
+        },
+      }),
       findMany: async (input: {
         where: {
           instrumentId: { in: string[] };
@@ -81,6 +88,15 @@ function price(instrumentId: string, tradingDate: string, close: number, volume 
 }
 
 describe("HistoricalExperimentRepository", () => {
+  it("reports the latest available real-market trading date", async () => {
+    const repository = new HistoricalExperimentRepository(fakeClient([], [
+      price("i1", "2026-10-13", 100),
+      price("i1", "2026-10-15", 105),
+    ]) as never);
+
+    await expect(repository.getLatestRealMarketDate()).resolves.toBe("2026-10-15");
+  });
+
   it("filters real-market candidates using only price/volume-derived metrics", async () => {
     const repository = new HistoricalExperimentRepository(fakeClient(
       [
@@ -103,6 +119,7 @@ describe("HistoricalExperimentRepository", () => {
       minAverageTradedValue: 50_000_000,
       minReturnPercent: 10,
       maxReturnPercent: null,
+      rankingOption: "raw1M3M",
       sortBy: "return",
       sortDirection: "desc",
     });
@@ -117,6 +134,57 @@ describe("HistoricalExperimentRepository", () => {
     expect(result.rows[0]?.returnPercent).toBeCloseTo(30);
     expect(result.rows[0]?.averageTradedValue).toBeCloseTo(114_000_000);
     expect(result.excluded.liquidity).toBe(1);
+  });
+
+  it("supports all four momentum ranking formulas", async () => {
+    const companies = [
+      { id: "c1", name: "Fast Ltd", isin: "INE000000011", instruments: [{ id: "i1", exchange: "NSE" as const, symbol: "FAST" }] },
+      { id: "c2", name: "Steady Ltd", isin: "INE000000012", instruments: [{ id: "i2", exchange: "NSE" as const, symbol: "STEADY" }] },
+      { id: "c3", name: "Slow Ltd", isin: "INE000000013", instruments: [{ id: "i3", exchange: "NSE" as const, symbol: "SLOW" }] },
+    ];
+    const prices = companies.flatMap((company, companyIndex) => {
+      const points: FakePrice[] = [];
+      const start = date("2025-10-01");
+      for (let day = 0; day <= 365; day += 1) {
+        const tradingDate = new Date(start);
+        tradingDate.setUTCDate(tradingDate.getUTCDate() + day);
+        const trend = [0.002, 0.0015, 0.001][companyIndex] ?? 0.001;
+        const swing = [0.03, 0.01, 0.02][companyIndex] ?? 0.01;
+        const close = 100 * Math.exp(trend * day) * (1 + Math.sin(day / 5) * swing);
+        points.push(price(company.instruments[0]!.id, tradingDate.toISOString().slice(0, 10), close));
+      }
+      return points;
+    });
+    const repository = new HistoricalExperimentRepository(fakeClient(companies, prices) as never);
+    const rankingOptions = [
+      "volatilityZScore1M3M",
+      "volatilityZScore6M12M",
+      "raw1M3M",
+      "raw6M12M",
+    ] as const;
+
+    for (const rankingOption of rankingOptions) {
+      const result = await repository.runFilter({
+        startDate: date("2026-04-01"),
+        endDate: date("2026-10-01"),
+        minAverageTradedValue: 0,
+        minReturnPercent: null,
+        maxReturnPercent: null,
+        rankingOption,
+        sortBy: "momentumScore",
+        sortDirection: "desc",
+      });
+
+      expect(result.rankingOption).toBe(rankingOption);
+      expect(result.rows).toHaveLength(3);
+      expect(result.rows.map((row) => row.rank)).toEqual([1, 2, 3]);
+      expect(result.rows.every((row) => Number.isFinite(row.momentumScore))).toBe(true);
+      if (rankingOption.startsWith("raw")) {
+        expect(result.rows[0]!.momentumScore).toBeCloseTo(
+          (result.rows[0]!.firstMomentumReturnPercent + result.rows[0]!.secondMomentumReturnPercent) / 2,
+        );
+      }
+    }
   });
 
   it("calculates selected-stock returns using next start price and previous end price", async () => {

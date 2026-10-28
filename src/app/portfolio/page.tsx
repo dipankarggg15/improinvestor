@@ -1,5 +1,8 @@
 import { Prisma } from "@prisma/client";
 
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { prisma } from "@/lib/db/prisma";
 import { decimal } from "@/lib/portfolio/accounting";
 import { listPortfolioValuations } from "@/lib/portfolio/service";
@@ -17,7 +20,7 @@ export default async function PortfolioPage() {
       where: { status: "OPEN" },
       orderBy: [{ openedAt: "asc" }, { createdAt: "asc" }],
       include: {
-        company: { select: { name: true } },
+        company: { select: { name: true, sector: true } },
         instrument: { select: { symbol: true, exchange: true } },
         strategyVersion: { include: { strategy: true } },
         trades: {
@@ -62,7 +65,9 @@ export default async function PortfolioPage() {
     return {
       id: episode.id,
       stock: episode.company.name,
-      symbol: `${episode.instrument.symbol} ${episode.instrument.exchange}`,
+      sector: episode.company.sector,
+      symbol: episode.instrument.symbol,
+      exchange: episode.instrument.exchange,
       strategyName,
       quantity: position.quantity,
       averageEntry: position.averageCost,
@@ -125,8 +130,8 @@ export default async function PortfolioPage() {
                 {holdings.map((holding) => (
                   <tr className="border-t border-[var(--border)]" key={holding.id}>
                     <td className="py-3 pr-3">
-                      <span className="block font-medium">{holding.stock}</span>
-                      <span className="text-xs text-[var(--muted)]">{holding.symbol}</span>
+                      <StockChartLink className="block font-medium text-[var(--accent)] hover:underline" exchange={holding.exchange} symbol={holding.symbol}>{holding.stock}</StockChartLink>
+                      <span className="text-xs text-[var(--muted)]">{holding.exchange}:{holding.symbol} · </span><SectorStatus className="text-xs text-[var(--muted)]" sector={holding.sector} />
                     </td>
                     <td className="py-3 pr-3">{holding.strategyName}</td>
                     <td className="py-3 pr-3">{formatQuantity(holding.quantity.toNumber())}</td>
@@ -142,7 +147,7 @@ export default async function PortfolioPage() {
               </tbody>
             </table>
           </div>
-          {holdings.length === 0 ? <p className="mt-3 text-sm text-[var(--muted)]">No open holdings.</p> : null}
+          {holdings.length === 0 ? <div className="mt-4"><EmptyState action={{ href: "/trades/new", label: "Record your first trade" }} secondaryAction={{ href: "/swing-setups", label: "Review trade-ready setups" }} title="No open holdings" description="Once a buy is recorded, this workspace will show live value, cost basis, profit and loss, and strategy attribution." icon="₹" /></div> : null}
         </div>
 
         <p className="text-xs text-[var(--muted)]">Valuation date: {formatDate(asOfDate)}</p>

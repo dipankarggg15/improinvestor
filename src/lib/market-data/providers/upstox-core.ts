@@ -1,11 +1,15 @@
 import { gunzipSync } from "node:zlib";
 
-import type { MarketDataProvider, ProviderDailyCandle, ProviderInstrument, ProviderQuote } from "@/lib/market-data/types";
+import type { MarketDataProvider, ProviderDailyCandle, ProviderIndexInstrument, ProviderInstrument, ProviderQuote } from "@/lib/market-data/types";
 
 const upstoxApiBaseUrl = "https://api.upstox.com/v3";
 const upstoxInstrumentMasterUrls = [
   "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz",
   "https://assets.upstox.com/market-quote/instruments/exchange/BSE.json.gz",
+];
+const upstoxIndexInstrumentMasterUrls = [
+  "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz",
+  "https://assets.upstox.com/market-quote/instruments/exchange/global.json.gz",
 ];
 const nseCashEquityTypes = new Set(["EQ", "BE", "SM", "ST", "BZ"]);
 const bseCashEquityTypes = new Set(["A", "B", "E", "M", "MT", "P", "T", "X", "XT", "Z"]);
@@ -15,16 +19,7 @@ type UpstoxProviderOptions = {
   readonly fetch?: typeof fetch;
   readonly apiBaseUrl?: string;
   readonly instrumentMasterUrls?: readonly string[];
-};
-
-type UpstoxInstrument = {
-  readonly segment?: unknown;
-  readonly instrument_type?: unknown;
-  readonly instrument_key?: unknown;
-  readonly isin?: unknown;
-  readonly trading_symbol?: unknown;
-  readonly name?: unknown;
-  readonly exchange?: unknown;
+  readonly indexInstrumentMasterUrls?: readonly string[];
 };
 
 type UpstoxCandleResponse = {
@@ -37,11 +32,82 @@ type UpstoxQuoteResponse = {
   readonly data?: Record<string, unknown>;
 };
 
+type UpstoxOhlcResponse = {
+  readonly data?: Record<string, unknown>;
+};
+
 export function createUpstoxMarketDataProviderCore(options: UpstoxProviderOptions): MarketDataProvider {
   const token = options.token;
   const fetcher = options.fetch ?? fetch;
   const apiBaseUrl = options.apiBaseUrl ?? upstoxApiBaseUrl;
   const instrumentMasterUrls = options.instrumentMasterUrls ?? upstoxInstrumentMasterUrls;
+  const indexInstrumentMasterUrls = options.indexInstrumentMasterUrls ?? upstoxIndexInstrumentMasterUrls;
+
+  async function fetchCurrentQuotes(instrumentKeys: readonly string[]) {
+    assertToken(token);
+    if (instrumentKeys.length === 0) return [];
+    if (instrumentKeys.length > 500) throw new Error("Upstox quote requests support at most 500 instruments.");
+    const url = new URL(`${apiBaseUrl}/market-quote/quotes`);
+    url.searchParams.set("instrument_key", instrumentKeys.join(","));
+    const payload = await requestJson<UpstoxQuoteResponse>(fetcher, url, { compressed: false, token });
+    const records = Object.values(payload.data ?? {}).filter(isRecord);
+    return records.flatMap((record) => {
+      const instrumentKey = valueAsString(record.instrument_token ?? record.instrument_key)
+        ?? (instrumentKeys.length === 1 ? instrumentKeys[0] : null);
+      return instrumentKey ? [parseQuote(instrumentKey, record)] : [];
+    });
+  }
+
+  async function fetchPreviousDailyCandles(instrumentKeys: readonly string[], targetDate: Date) {
+    assertToken(token);
+    if (instrumentKeys.length === 0) return [];
+    if (instrumentKeys.length > 500) throw new Error("Upstox OHLC requests support at most 500 instruments.");
+    if (targetDate < indiaCalendarDate()) {
+      const quotes = await fetchCurrentQuotes(instrumentKeys);
+      return quotes.flatMap((quote) => quote.previousClose === null ? [] : [{
+        instrumentKey: quote.instrumentKey,
+        tradingDate: targetDate,
+        open: quote.previousClose,
+        high: quote.previousClose,
+        low: quote.previousClose,
+        close: quote.previousClose,
+        volume: BigInt(0),
+        closeOnly: true,
+      }]);
+    }
+    const url = new URL(`${apiBaseUrl}/market-quote/ohlc`);
+    url.searchParams.set("instrument_key", instrumentKeys.join(","));
+    url.searchParams.set("interval", "1d");
+    const payload = await requestJson<UpstoxOhlcResponse>(fetcher, url, { compressed: false, token });
+    const records = Object.values(payload.data ?? {}).filter(isRecord);
+    const completed = records.flatMap((record) => {
+      const instrumentKey = valueAsString(record.instrument_token ?? record.instrument_key)
+        ?? (instrumentKeys.length === 1 ? instrumentKeys[0] : null);
+      const candidates = instrumentKey
+        ? [record.prev_ohlc, record.live_ohlc]
+            .map((ohlc) => parsePreviousDailyCandle(instrumentKey, ohlc))
+            .filter((candle): candle is ProviderDailyCandle => candle !== null && candle.tradingDate <= targetDate)
+            .sort((left, right) => right.tradingDate.getTime() - left.tradingDate.getTime())
+        : [];
+      const candle = candidates[0] ?? null;
+      return candle ? [candle] : [];
+    });
+    const completedKeys = new Set(completed.map((candle) => candle.instrumentKey));
+    const missingKeys = instrumentKeys.filter((instrumentKey) => !completedKeys.has(instrumentKey));
+    if (missingKeys.length === 0) return completed;
+
+    const quotes = await fetchCurrentQuotes(missingKeys);
+    return completed.concat(quotes.flatMap((quote) => quote.previousClose === null ? [] : [{
+      instrumentKey: quote.instrumentKey,
+      tradingDate: targetDate,
+      open: quote.previousClose,
+      high: quote.previousClose,
+      low: quote.previousClose,
+      close: quote.previousClose,
+      volume: BigInt(0),
+      closeOnly: true,
+    }]));
+  }
 
   return {
     name: "upstox",
@@ -65,6 +131,19 @@ export function createUpstoxMarketDataProviderCore(options: UpstoxProviderOption
 
       return instruments;
     },
+    async fetchIndexInstruments() {
+      const rawResponses = await Promise.all(
+        indexInstrumentMasterUrls.map((url) => requestJson<unknown>(fetcher, url, { compressed: true, token: null })),
+      );
+      const indices: ProviderIndexInstrument[] = [];
+
+      for (const raw of rawResponses) {
+        if (!Array.isArray(raw)) throw new Error("Upstox index instrument master response was malformed.");
+        indices.push(...raw.map(parseIndexInstrument).filter((instrument): instrument is ProviderIndexInstrument => instrument !== null));
+      }
+
+      return indices.sort((left, right) => left.exchange.localeCompare(right.exchange) || left.name.localeCompare(right.name));
+    },
     async fetchHistoricalDailyCandles(input) {
       assertToken(token);
       const url = `${apiBaseUrl}/historical-candle/${encodeURIComponent(input.instrumentKey)}/days/1/${formatDate(input.endDate)}/${formatDate(input.startDate)}`;
@@ -79,16 +158,17 @@ export function createUpstoxMarketDataProviderCore(options: UpstoxProviderOption
       );
     },
     async fetchCurrentQuote(input) {
-      assertToken(token);
-      const url = new URL(`${apiBaseUrl}/market-quote/quotes`);
-      url.searchParams.set("instrument_key", input.instrumentKey);
-      const payload = await requestJson<UpstoxQuoteResponse>(fetcher, url, { compressed: false, token });
-      const quote = firstRecordValue(payload.data);
+      const quote = (await fetchCurrentQuotes([input.instrumentKey]))[0];
       if (!quote) {
         throw new Error("Upstox quote response was empty.");
       }
-
-      return parseQuote(input.instrumentKey, quote);
+      return quote;
+    },
+    async fetchCurrentQuotes(input) {
+      return fetchCurrentQuotes(input.instrumentKeys);
+    },
+    async fetchPreviousDailyCandles(input) {
+      return fetchPreviousDailyCandles(input.instrumentKeys, input.targetDate);
     },
   };
 }
@@ -113,7 +193,14 @@ async function requestJson<T>(
   }
 
   if (response.status === 429) {
-    throw new Error("Upstox rate limit exceeded.");
+    const retryAfter = response.headers.get("retry-after");
+    const seconds = retryAfter === null ? NaN : Number(retryAfter);
+    const retryAfterMs = Number.isFinite(seconds)
+      ? Math.max(0, seconds * 1000)
+      : retryAfter ? Math.max(0, Date.parse(retryAfter) - Date.now()) : 0;
+    throw Object.assign(new Error("Upstox rate limit exceeded."), {
+      retryAfterMs: Number.isFinite(retryAfterMs) ? retryAfterMs : 0,
+    });
   }
 
   if (!response.ok) {
@@ -176,6 +263,30 @@ function parseCashEquity(raw: unknown): ProviderInstrument | null {
   };
 }
 
+function parseIndexInstrument(raw: unknown): ProviderIndexInstrument | null {
+  if (!isRecord(raw)) return null;
+  const segment = valueAsString(raw.segment);
+  const exchange = valueAsString(raw.exchange);
+  const name = valueAsString(raw.name);
+  const tradingSymbol = valueAsString(raw.trading_symbol);
+  const instrumentKey = valueAsString(raw.instrument_key);
+  if (
+    (segment !== "NSE_INDEX" && segment !== "GLOBAL_INDEX") ||
+    (exchange !== "NSE" && exchange !== "GLOBAL") ||
+    !name || !tradingSymbol || !instrumentKey
+  ) return null;
+
+  return {
+    exchange,
+    name,
+    tradingSymbol,
+    instrumentKey,
+    segment,
+    country: valueAsString(raw.country),
+    latency: valueAsString(raw.latency),
+  };
+}
+
 function isCashEquityType(segment: string | null, instrumentType: string | null) {
   if (!instrumentType) return false;
   if (segment === "NSE_EQ" && !nseCashEquityTypes.has(instrumentType)) return false;
@@ -211,6 +322,29 @@ function parseDailyCandle(instrumentKey: string, raw: unknown): ProviderDailyCan
   };
 }
 
+function parsePreviousDailyCandle(instrumentKey: string, raw: unknown): ProviderDailyCandle | null {
+  if (!isRecord(raw)) return null;
+  const open = numberLike(raw.open);
+  const high = numberLike(raw.high);
+  const low = numberLike(raw.low);
+  const close = numberLike(raw.close);
+  const timestamp = epochMilliseconds(raw.ts ?? raw.timestamp);
+  if (open === null || high === null || low === null || close === null || timestamp === null) return null;
+
+  const values = [Number(open), Number(high), Number(low), Number(close)];
+  const tradingDate = indiaDateFromEpochMilliseconds(timestamp);
+  const volumeNumber = Number(raw.volume ?? 0);
+  return {
+    instrumentKey,
+    tradingDate,
+    open,
+    high: String(Math.max(...values)),
+    low: String(Math.min(...values)),
+    close,
+    volume: BigInt(Number.isFinite(volumeNumber) ? Math.max(0, Math.trunc(volumeNumber)) : 0),
+  };
+}
+
 function parseQuote(instrumentKey: string, raw: unknown): ProviderQuote {
   if (!isRecord(raw)) {
     throw new Error("Upstox quote response was malformed.");
@@ -223,7 +357,7 @@ function parseQuote(instrumentKey: string, raw: unknown): ProviderQuote {
 
   const ohlc = isRecord(raw.ohlc) ? raw.ohlc : {};
   const lastTradedAt = parseDate(valueAsString(raw.last_trade_time ?? raw.lastTradedAt ?? raw.timestamp));
-  const previousClose = numberLike(ohlc.close ?? raw.previous_close ?? raw.previousClose);
+  const previousClose = numberLike(raw.prev_close_price ?? raw.previous_close ?? raw.previousClose ?? ohlc.close);
   const volume = raw.volume === undefined || raw.volume === null ? null : BigInt(Math.trunc(Number(raw.volume)));
 
   return {
@@ -233,11 +367,6 @@ function parseQuote(instrumentKey: string, raw: unknown): ProviderQuote {
     previousClose,
     volume,
   };
-}
-
-function firstRecordValue(input: Record<string, unknown> | undefined) {
-  if (!input) return null;
-  return Object.values(input).find(isRecord) ?? null;
 }
 
 function formatDate(date: Date) {
@@ -264,6 +393,22 @@ function numberLike(input: unknown) {
   if (typeof input === "number" && Number.isFinite(input)) return String(input);
   if (typeof input === "string" && input.trim() && Number.isFinite(Number(input))) return input.trim();
   return null;
+}
+
+function epochMilliseconds(input: unknown) {
+  const value = typeof input === "number" ? input : typeof input === "string" ? Number(input) : NaN;
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value < 10_000_000_000 ? value * 1000 : value;
+}
+
+function indiaDateFromEpochMilliseconds(timestamp: number) {
+  const india = new Date(timestamp + 5.5 * 60 * 60 * 1000);
+  return new Date(Date.UTC(india.getUTCFullYear(), india.getUTCMonth(), india.getUTCDate()));
+}
+
+function indiaCalendarDate(now = new Date()) {
+  const india = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  return new Date(Date.UTC(india.getUTCFullYear(), india.getUTCMonth(), india.getUTCDate()));
 }
 
 function isFiniteNumber(input: unknown) {

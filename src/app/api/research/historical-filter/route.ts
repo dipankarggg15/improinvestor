@@ -4,6 +4,7 @@ import {
   HistoricalExperimentRepository,
   parseFilterSortKey,
   parseHistoricalDate,
+  parseMomentumRankingOption,
   parseOptionalNumber,
   parsePositiveCrores,
   parseSortDirection,
@@ -19,6 +20,7 @@ export async function POST(request: Request) {
       minAverageTradedValue: parsePositiveCrores(body.minAverageTradedValueCr, 5),
       minReturnPercent: parseOptionalNumber(body.minReturnPercent),
       maxReturnPercent: parseOptionalNumber(body.maxReturnPercent),
+      rankingOption: parseMomentumRankingOption(body.rankingOption),
       sortBy: parseFilterSortKey(body.sortBy),
       sortDirection: parseSortDirection(body.sortDirection),
     });

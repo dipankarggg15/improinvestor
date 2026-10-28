@@ -6,6 +6,7 @@ import { getReviewScheduleForPosition } from "@/lib/reviews/service";
 export type StrategyLiveHolding = {
   readonly episodeId: string;
   readonly companyName: string;
+  readonly sector: string | null;
   readonly symbol: string;
   readonly exchange: string;
   readonly entryDate: Date;
@@ -34,7 +35,7 @@ export async function listStrategyLiveHoldings(input: {
     },
     orderBy: { openedAt: "asc" },
     include: {
-      company: { select: { name: true } },
+      company: { select: { name: true, sector: true } },
       instrument: { select: { symbol: true, exchange: true } },
       trades: {
         orderBy: [{ tradeDate: "asc" }, { createdAt: "asc" }],
@@ -141,6 +142,7 @@ export async function listStrategyLiveHoldings(input: {
     return {
       episodeId: episode.id,
       companyName: episode.company.name,
+      sector: episode.company.sector,
       symbol: episode.instrument.symbol,
       exchange: episode.instrument.exchange,
       entryDate: episode.openedAt,

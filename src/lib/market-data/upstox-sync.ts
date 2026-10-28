@@ -61,7 +61,9 @@ export function canonicalizeUpstoxEquities(instruments: readonly ProviderInstrum
   for (const instrument of instruments) {
     if (!instrument.isin || !instrument.active) continue;
     if (instrument.segment !== "NSE_EQ" && instrument.segment !== "BSE_EQ") continue;
-    byIsin.set(instrument.isin, [...(byIsin.get(instrument.isin) ?? []), instrument]);
+    const companyInstruments = byIsin.get(instrument.isin);
+    if (companyInstruments) companyInstruments.push(instrument);
+    else byIsin.set(instrument.isin, [instrument]);
   }
 
   return [...byIsin.entries()]
@@ -157,8 +159,8 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
         endDate,
       });
       validateCandles(candles, endDate);
-      const upserted = await upsertDailyPrices(options.client, storedCanonical.id, candles);
-      candlesUpserted += upserted;
+      const insertedCount = await upsertDailyPrices(options.client, storedCanonical.id, candles);
+      candlesUpserted += insertedCount;
       successful += 1;
     } catch (error) {
       failures.push({
@@ -169,7 +171,18 @@ export async function runUpstoxRealMarketSync(options: UpstoxSyncOptions): Promi
     } finally {
       processed += 1;
       if (processed % progressEvery === 0 || processed === syncTargets.length) {
-        await updateSyncProgress(options.client, syncJob.id, { processed, successful, skipped, failures, candlesUpserted });
+        await updateSyncProgress(options.client, syncJob.id, {
+          processed,
+          successful,
+          skipped,
+          failures,
+          candlesUpserted,
+          mode: options.mode,
+          totalCompanies: companies.length,
+          totalInstruments: syncTargets.length,
+          endDate,
+          startedAt,
+        });
       }
     }
   });
@@ -275,24 +288,47 @@ async function upsertCompanyAndInstruments(client: PrismaClient, company: Canoni
   const stored: StoredInstrument[] = [];
 
   for (const instrument of company.instruments) {
-    const row = await db.instrument.upsert({
-      where: { exchange_instrumentKey: { exchange: instrument.exchange, instrumentKey: instrument.instrumentKey } },
-      update: {
-        companyId: storedCompany.id,
-        symbol: instrument.symbol,
-        active: instrument.active,
-        marketDataSource: realSource,
-      },
-      create: {
-        companyId: storedCompany.id,
-        exchange: instrument.exchange,
-        symbol: instrument.symbol,
-        instrumentKey: instrument.instrumentKey,
-        active: instrument.active,
-        marketDataSource: realSource,
-      },
+    const existingByKey = await db.instrument.findFirst({
+      where: { exchange: instrument.exchange, instrumentKey: instrument.instrumentKey },
       select: { id: true, instrumentKey: true },
     });
+    const existingBySymbol = await db.instrument.findFirst({
+      where: { exchange: instrument.exchange, symbol: instrument.symbol },
+      select: { id: true, instrumentKey: true },
+    });
+    if (existingByKey && existingBySymbol && existingByKey.id !== existingBySymbol.id) {
+      await db.instrument.update({
+        where: { id: existingByKey.id },
+        data: {
+          symbol: `__SUPERSEDED__${existingByKey.id}`,
+          instrumentKey: `__SUPERSEDED__${existingByKey.id}`,
+          active: false,
+          marketDataSource: realSource,
+        },
+        select: { id: true, instrumentKey: true },
+      });
+    }
+    const existing = existingBySymbol ?? existingByKey;
+    const data = {
+      companyId: storedCompany.id,
+      symbol: instrument.symbol,
+      instrumentKey: instrument.instrumentKey,
+      active: instrument.active,
+      marketDataSource: realSource,
+    };
+    const row = existing
+      ? await db.instrument.update({
+        where: { id: existing.id },
+        data,
+        select: { id: true, instrumentKey: true },
+      })
+      : await db.instrument.create({
+        data: {
+          ...data,
+          exchange: instrument.exchange,
+        },
+        select: { id: true, instrumentKey: true },
+      });
     stored.push(row);
   }
 
@@ -336,7 +372,7 @@ function validateCandles(candles: readonly ProviderDailyCandle[], endDate: Date)
 
 async function upsertDailyPrices(client: PrismaClient, instrumentId: string, candles: readonly ProviderDailyCandle[]) {
   const db = client as unknown as RealMarketPrismaClient;
-  await db.dailyPrice.createMany({
+  const inserted = await db.dailyPrice.createMany({
     data: candles.map((candle) => ({
       instrumentId,
       tradingDate: candle.tradingDate,
@@ -350,7 +386,7 @@ async function upsertDailyPrices(client: PrismaClient, instrumentId: string, can
     skipDuplicates: true,
   });
 
-  return candles.length;
+  return inserted.count;
 }
 
 async function withRetry<T>(operation: () => Promise<T>, attempts = 8) {
@@ -362,9 +398,13 @@ async function withRetry<T>(operation: () => Promise<T>, attempts = 8) {
       lastError = error;
       if (attempt === attempts) break;
       const message = error instanceof Error ? error.message : "";
-      const waitMs = message.includes("rate limit")
+      const defaultWaitMs = message.includes("rate limit")
         ? Math.min(60_000, 10_000 * attempt)
         : 250 * (2 ** (attempt - 1));
+      const retryAfterMs = error instanceof Error && "retryAfterMs" in error &&
+        typeof error.retryAfterMs === "number" && Number.isFinite(error.retryAfterMs)
+        ? error.retryAfterMs : 0;
+      const waitMs = Math.max(defaultWaitMs, retryAfterMs);
       await delay(waitMs);
     }
   }
@@ -438,6 +478,11 @@ async function updateSyncProgress(
     readonly skipped: number;
     readonly failures: UpstoxSyncResult["failures"];
     readonly candlesUpserted: number;
+    readonly mode: UpstoxSyncMode;
+    readonly totalCompanies: number;
+    readonly totalInstruments: number;
+    readonly endDate: Date;
+    readonly startedAt: Date;
   },
 ) {
   const db = client as unknown as RealMarketPrismaClient;
@@ -450,6 +495,11 @@ async function updateSyncProgress(
       recordsSkipped: progress.skipped,
       metadata: {
         marketDataSource: realSource,
+        mode: progress.mode,
+        totalCompanies: progress.totalCompanies,
+        totalInstruments: progress.totalInstruments,
+        completedEodThrough: progress.endDate.toISOString().slice(0, 10),
+        startedAt: progress.startedAt.toISOString(),
         candlesUpserted: progress.candlesUpserted,
         failures: progress.failures.slice(-25),
       },
@@ -487,11 +537,13 @@ type RealMarketPrismaClient = {
     upsert(input: unknown): Promise<{ readonly id: string }>;
   };
   readonly instrument: {
-    upsert(input: unknown): Promise<StoredInstrument>;
+    findFirst(input: unknown): Promise<StoredInstrument | null>;
+    update(input: unknown): Promise<StoredInstrument>;
+    create(input: unknown): Promise<StoredInstrument>;
   };
   readonly dailyPrice: {
     findFirst(input: unknown): Promise<{ readonly tradingDate: Date } | null>;
-    createMany(input: unknown): Promise<unknown>;
+    createMany(input: unknown): Promise<{ count: number }>;
   };
   readonly dataSync: {
     create(input: unknown): Promise<{ readonly id: string }>;

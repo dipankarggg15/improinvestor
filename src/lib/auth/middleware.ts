@@ -6,6 +6,10 @@ import { isOwnerEmail } from "@/lib/auth/policy";
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
+  if (process.env.LOCAL_AUTH_BYPASS === "true" && process.env.NODE_ENV !== "production") {
+    return response;
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase() ?? "";

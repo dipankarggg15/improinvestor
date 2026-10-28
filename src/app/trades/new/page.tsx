@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { recordTradeAction } from "@/app/portfolio/actions";
 import { TradeEntryForm } from "@/components/trades/trade-entry-form";
 import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
+import { SectorStatus } from "@/components/sectors/sector-status";
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
 import { prisma } from "@/lib/db/prisma";
 import { calculateRequiredCash, getDefaultTradePrice } from "@/lib/portfolio/service";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/ui/format";
@@ -103,9 +105,19 @@ export default async function NewTradePage({ searchParams }: NewTradePageProps) 
         </div>
 
         <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
-          <h2 className="text-lg font-semibold">{reviewSnapshot?.company.name ?? snapshot?.company.name}</h2>
+          <h2 className="text-lg font-semibold">
+            <StockChartLink
+              className="text-[var(--accent)] hover:underline"
+              date={formatDate(defaultDate)}
+              exchange={reviewSnapshot?.instrument.exchange ?? snapshot?.instrument.exchange ?? "NSE"}
+              symbol={reviewSnapshot?.instrument.symbol ?? snapshot?.instrument.symbol ?? ""}
+            >
+              {reviewSnapshot?.company.name ?? snapshot?.company.name}
+            </StockChartLink>
+          </h2>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <Info label="Symbol" value={`${reviewSnapshot?.instrument.symbol ?? snapshot?.instrument.symbol} (${reviewSnapshot?.instrument.exchange ?? snapshot?.instrument.exchange})`} />
+            <Info label="Sector" value={<SectorStatus date={formatDate(defaultDate)} sector={reviewSnapshot?.company.sector ?? snapshot?.company.sector} />} />
             <Info label="Strategy" value={reviewSnapshot?.review.strategy.name ?? snapshot?.strategyRun.strategy.name ?? "-"} />
             <Info label="Version" value={`V${reviewSnapshot?.review.strategyVersion.versionNumber ?? snapshot?.strategyRun.strategyVersion.versionNumber ?? "-"}`} />
             <Info label="Source Date" value={formatDate(defaultDate)} />
@@ -178,7 +190,7 @@ export default async function NewTradePage({ searchParams }: NewTradePageProps) 
   );
 }
 
-function Info({ label, value }: { readonly label: string; readonly value: string }) {
+function Info({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-4">
       <dt className="text-[var(--muted)]">{label}</dt>

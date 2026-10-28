@@ -5,16 +5,18 @@ export function isOwnerEmail(email: string | null | undefined, ownerEmail: strin
 
 const protectedRoutes = [
   "/",
+  "/finding-momentum",
+  "/swing-setups",
+  "/watchlists",
+  "/charts",
   "/strategies",
   "/portfolio",
-  "/stocks",
-  "/finding-momentum",
+  "/trades",
   "/screener",
   "/return-history",
   "/analytics",
   "/research",
   "/api/research",
-  "/settings",
 ] as const;
 
 export function isProtectedPath(pathname: string) {

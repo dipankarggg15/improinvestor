@@ -6,9 +6,11 @@
   --muted: #667063;
   --panel: #ffffff;
   --panel-soft: #eef2ea;
+  --panel-raised: #fbfcfa;
   --border: #d9dfd3;
   --accent: #1f7a4d;
   --accent-strong: #145437;
+  --focus: #2563eb;
 }
 
 html,
@@ -34,9 +36,100 @@ button,
 input,
 select,
 textarea {
+  min-width: 0;
   max-width: 100%;
+  font: inherit;
 }
 
 table {
   overflow-wrap: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+thead {
+  background: color-mix(in srgb, var(--panel) 94%, var(--panel-soft));
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--focus) 35%, transparent);
+  outline-offset: 2px;
+}
+
+button:not(:disabled),
+summary {
+  cursor: pointer;
+}
+
+.overflow-x-auto {
+  scrollbar-color: color-mix(in srgb, var(--muted) 55%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.overflow-x-auto table th:first-child,
+.overflow-x-auto table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--panel);
+}
+
+.overflow-x-auto table thead th:first-child {
+  z-index: 3;
+  background: color-mix(in srgb, var(--panel) 94%, var(--panel-soft));
+}
+
+.section-nav {
+  scrollbar-width: none;
+}
+
+.section-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.metric-value {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 639px) {
+  .section-nav {
+    padding-right: 3rem;
+    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 2.5rem), transparent 100%);
+    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 2.5rem), transparent 100%);
+  }
+
+  .stock-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stock-summary-grid > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .stock-summary-grid > * {
+    padding: 0.875rem;
+  }
+
+  .mobile-compact-card {
+    padding: 0.875rem;
+  }
+
+  .overflow-x-auto:has(> table)::before {
+    content: "Swipe to see more columns →";
+    display: block;
+    position: sticky;
+    left: 0;
+    width: max-content;
+    margin: 0 0 0.5rem;
+    color: var(--muted);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
 }

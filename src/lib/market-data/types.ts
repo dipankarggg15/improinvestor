@@ -15,6 +15,16 @@ export type ProviderInstrument = {
   readonly active: boolean;
 };
 
+export type ProviderIndexInstrument = {
+  readonly exchange: "NSE" | "GLOBAL";
+  readonly name: string;
+  readonly tradingSymbol: string;
+  readonly instrumentKey: string;
+  readonly segment: "NSE_INDEX" | "GLOBAL_INDEX";
+  readonly country: string | null;
+  readonly latency: string | null;
+};
+
 export type ProviderDailyCandle = {
   readonly instrumentKey: string;
   readonly tradingDate: Date;
@@ -23,6 +33,7 @@ export type ProviderDailyCandle = {
   readonly low: string;
   readonly close: string;
   readonly volume: bigint;
+  readonly closeOnly?: boolean;
 };
 
 export type ProviderQuote = {
@@ -36,6 +47,7 @@ export type ProviderQuote = {
 export type MarketDataProvider = {
   readonly name: MarketDataProviderName;
   fetchInstruments(): Promise<ProviderInstrument[]>;
+  fetchIndexInstruments?(): Promise<ProviderIndexInstrument[]>;
   fetchHistoricalDailyCandles(input: {
     readonly instrumentKey: string;
     readonly startDate: Date;
@@ -44,4 +56,11 @@ export type MarketDataProvider = {
   fetchCurrentQuote(input: {
     readonly instrumentKey: string;
   }): Promise<ProviderQuote>;
+  fetchCurrentQuotes?(input: {
+    readonly instrumentKeys: readonly string[];
+  }): Promise<ProviderQuote[]>;
+  fetchPreviousDailyCandles?(input: {
+    readonly instrumentKeys: readonly string[];
+    readonly targetDate: Date;
+  }): Promise<ProviderDailyCandle[]>;
 };

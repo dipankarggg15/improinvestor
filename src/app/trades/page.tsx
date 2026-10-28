@@ -1,6 +1,9 @@
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { prisma } from "@/lib/db/prisma";
 import { normalizeStockSearchText, rankStockSearchCandidates } from "@/lib/stocks/fuzzy-search";
 import { formatCurrency, formatDate, formatQuantity } from "@/lib/ui/format";
@@ -74,7 +77,7 @@ export default async function TradesPage({ searchParams }: TradesPageProps) {
           </Link>
         </div>
 
-        <form className="grid gap-3 rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:grid-cols-2 lg:grid-cols-5">
+        <form className="grid min-w-0 gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-5">
           <label className="grid gap-2 text-sm font-medium">
             Type
             <select className="h-10 rounded-md border border-[var(--border)] px-3" defaultValue={side ?? ""} name="side">
@@ -105,6 +108,7 @@ export default async function TradesPage({ searchParams }: TradesPageProps) {
           <button className="h-10 rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white lg:self-end" type="submit">
             Filter
           </button>
+          {side || strategy || stock ? <Link className="text-sm font-semibold text-[var(--accent)] sm:col-span-2 lg:col-span-5" href="/trades">Clear all filters</Link> : null}
         </form>
 
         <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
@@ -131,8 +135,8 @@ export default async function TradesPage({ searchParams }: TradesPageProps) {
                     </td>
                     <td className="py-3 pr-3 font-semibold">{trade.side}</td>
                     <td className="py-3 pr-3">
-                      <span className="block font-medium">{trade.company.name}</span>
-                      <span className="text-xs text-[var(--muted)]">{trade.instrument.symbol} {trade.instrument.exchange}</span>
+                      <StockChartLink className="block font-medium text-[var(--accent)] hover:underline" exchange={trade.instrument.exchange} symbol={trade.instrument.symbol}>{trade.company.name}</StockChartLink>
+                      <span className="text-xs text-[var(--muted)]">{trade.instrument.symbol} {trade.instrument.exchange} · </span><SectorStatus className="text-xs text-[var(--muted)]" sector={trade.company.sector} />
                     </td>
                     <td className="py-3 pr-3">{strategyLabel(trade)}</td>
                     <td className="py-3 pr-3">{formatQuantity(trade.quantity.toNumber())}</td>
@@ -144,7 +148,7 @@ export default async function TradesPage({ searchParams }: TradesPageProps) {
               </tbody>
             </table>
           </div>
-          {trades.length === 0 ? <p className="mt-3 text-sm text-[var(--muted)]">No trades match these filters.</p> : null}
+          {trades.length === 0 ? <div className="mt-4"><EmptyState action={{ href: "/trades/new", label: "Record a trade" }} secondaryAction={{ href: "/portfolio", label: "View portfolio" }} title={side || strategy || stock ? "No trades match these filters" : "Your trade ledger is empty"} description={side || strategy || stock ? "Adjust or clear the filters to widen the trade history." : "Record a buy or sell to begin tracking holdings, realized results, and strategy attribution."} icon="⇄" /></div> : null}
         </div>
       </div>
     </section>

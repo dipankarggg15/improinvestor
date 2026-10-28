@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import type {
   HistoricalFilterResult,
   HistoricalFilterRow,
   HistoricalFilterSortKey,
+  HistoricalMomentumRankingOption,
   ReturnExperimentPositionView,
   ReturnExperimentStats,
   ReturnExperimentView,
@@ -41,13 +44,19 @@ const emptyStats: ReturnExperimentStats = {
   averageHoldingDays: null,
 };
 
-export function HistoricalExperimentWorkspace() {
-  const [filterStartDate, setFilterStartDate] = useState("2026-04-03");
-  const [filterEndDate, setFilterEndDate] = useState("2026-09-07");
+export function HistoricalExperimentWorkspace({
+  latestMarketDate,
+}: {
+  readonly latestMarketDate: string | null;
+}) {
+  const defaultEndDate = latestMarketDate ?? localDateInputValue();
+  const [filterStartDate, setFilterStartDate] = useState(() => shiftIsoDateMonths(defaultEndDate, -6));
+  const [filterEndDate, setFilterEndDate] = useState(defaultEndDate);
   const [minAverageTradedValueCr, setMinAverageTradedValueCr] = useState("5");
   const [minReturnPercent, setMinReturnPercent] = useState("");
   const [maxReturnPercent, setMaxReturnPercent] = useState("");
-  const [sortBy, setSortBy] = useState<HistoricalFilterSortKey>("return");
+  const [rankingOption, setRankingOption] = useState<HistoricalMomentumRankingOption>("volatilityZScore1M3M");
+  const [sortBy, setSortBy] = useState<HistoricalFilterSortKey>("momentumScore");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [activeTab, setActiveTab] = useState<Tab>("filter");
   const [filterResult, setFilterResult] = useState<HistoricalFilterResult | null>(null);
@@ -72,17 +81,22 @@ export function HistoricalExperimentWorkspace() {
     postlessJson<ReturnExperimentView | null>("/api/research/return-experiment")
       .then((experiment) => {
         if (!mounted || !experiment) return;
-        restoreExperiment(experiment);
-        setCalculated(experiment.positions.some((position) => position.returnPercent !== null || position.excludedReason));
+        const restored = extendSameDayPositions(experiment, latestMarketDate);
+        restoreExperiment(restored.experiment);
+        if (restored.changed) {
+          setStats({ ...emptyStats, totalPositions: restored.experiment.positions.length });
+        }
+        setCalculated(!restored.changed && experiment.positions.some((position) => position.returnPercent !== null || position.excludedReason));
       })
       .catch(() => undefined);
     return () => {
       mounted = false;
     };
-  }, [restoreExperiment]);
+  }, [latestMarketDate, restoreExperiment]);
 
   const primaryLabel = calculated || experimentId ? "Recalculate" : "Get Return";
   const validStats = useMemo(() => stats, [stats]);
+  const selectedInstrumentIds = useMemo(() => new Set(positions.map((position) => position.instrumentId)), [positions]);
 
   async function runFilter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -96,6 +110,7 @@ export function HistoricalExperimentWorkspace() {
         minAverageTradedValueCr,
         minReturnPercent,
         maxReturnPercent,
+        rankingOption,
         sortBy,
         sortDirection,
       });
@@ -129,7 +144,8 @@ export function HistoricalExperimentWorkspace() {
   }
 
   async function addPosition(row: HistoricalFilterRow) {
-    const nextPosition = pendingPositionFromFilterRow(row);
+    if (selectedInstrumentIds.has(row.instrumentId)) return;
+    const nextPosition = pendingPositionFromFilterRow(row, latestMarketDate);
     setError(null);
 
     if (!experimentId) {
@@ -292,21 +308,33 @@ export function HistoricalExperimentWorkspace() {
             <DateField label="Filter Start Date" onChange={setFilterStartDate} value={filterStartDate} />
             <DateField label="Filter End Date" onChange={setFilterEndDate} value={filterEndDate} />
             <NumberField label="Min ATV" onChange={setMinAverageTradedValueCr} suffix="Cr/day" value={minAverageTradedValueCr} />
-            <SelectField label="Sort By" onChange={(value) => setSortBy(value as HistoricalFilterSortKey)} value={sortBy}>
-              <option value="return">Filter Return</option>
-              <option value="oneWeekReturn">1W Return</option>
-              <option value="oneMonthReturn">1M Return</option>
-              <option value="threeMonthReturn">3M Return</option>
-              <option value="averageTradedValue">ATV/D</option>
-              <option value="company">Company</option>
-            </SelectField>
-            <NumberField label="Min Return" onChange={setMinReturnPercent} suffix="%" value={minReturnPercent} />
-            <NumberField label="Max Return" onChange={setMaxReturnPercent} suffix="%" value={maxReturnPercent} />
-            <SelectField label="Direction" onChange={(value) => setSortDirection(value === "asc" ? "asc" : "desc")} value={sortDirection}>
-              <option value="desc">High to Low</option>
-              <option value="asc">Low to High</option>
+            <SelectField label="Ranking Formula" onChange={(value) => setRankingOption(value as HistoricalMomentumRankingOption)} value={rankingOption}>
+              <option value="volatilityZScore1M3M">1M / 3M Volatility Z-Score</option>
+              <option value="volatilityZScore6M12M">6M / 12M Volatility Z-Score</option>
+              <option value="raw1M3M">1M / 3M Raw</option>
+              <option value="raw6M12M">6M / 12M Raw</option>
             </SelectField>
           </div>
+          <details className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--panel-raised)]">
+            <summary className="flex list-none items-center justify-between px-3 py-2.5 text-sm font-semibold">Advanced filters <span aria-hidden="true" className="text-[var(--muted)]">＋</span></summary>
+            <div className="grid gap-3 border-t border-[var(--border)] p-3 md:grid-cols-2 xl:grid-cols-4">
+              <SelectField label="Sort By" onChange={(value) => setSortBy(value as HistoricalFilterSortKey)} value={sortBy}>
+                <option value="momentumScore">Momentum Score</option>
+                <option value="return">Filter Return</option>
+                <option value="oneWeekReturn">1W Return</option>
+                <option value="oneMonthReturn">1M Return</option>
+                <option value="threeMonthReturn">3M Return</option>
+                <option value="averageTradedValue">ATV/D</option>
+                <option value="company">Company</option>
+              </SelectField>
+              <NumberField label="Min Return" onChange={setMinReturnPercent} suffix="%" value={minReturnPercent} />
+              <NumberField label="Max Return" onChange={setMaxReturnPercent} suffix="%" value={maxReturnPercent} />
+              <SelectField label="Direction" onChange={(value) => setSortDirection(value === "asc" ? "asc" : "desc")} value={sortDirection}>
+                <option value="desc">High to Low</option>
+                <option value="asc">Low to High</option>
+              </SelectField>
+            </div>
+          </details>
         </form>
       </div>
 
@@ -318,7 +346,7 @@ export function HistoricalExperimentWorkspace() {
           <TabButton active={activeTab === "returns"} onClick={() => setActiveTab("returns")}>Return Results</TabButton>
         </div>
         {activeTab === "filter" ? (
-          <FilterResults result={filterResult} onAdd={addPosition} />
+          <FilterResults result={filterResult} selectedInstrumentIds={selectedInstrumentIds} onAdd={addPosition} />
         ) : (
           <ReturnResults
             positions={positions}
@@ -358,9 +386,11 @@ async function fetchJson<T>(url: string, init: RequestInit = {}) {
 
 function FilterResults({
   result,
+  selectedInstrumentIds,
   onAdd,
 }: {
   readonly result: HistoricalFilterResult | null;
+  readonly selectedInstrumentIds: ReadonlySet<string>;
   readonly onAdd: (row: HistoricalFilterRow) => void;
 }) {
   if (!result) return <EmptyState detail="Choose historical filters and find stocks." title="No filter run yet" />;
@@ -372,13 +402,16 @@ function FilterResults({
         <span>{result.excluded.missingPrices + result.excluded.liquidity + result.excluded.returnFilter} excluded</span>
       </div>
       <div className="max-w-full overflow-x-auto">
-        <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
           <thead className="border-y border-[var(--border)] bg-[var(--panel-soft)] text-xs uppercase text-[var(--muted)]">
             <tr>
               <th className="px-3 py-3 font-semibold">Add</th>
               <th className="px-3 py-3 font-semibold">Rank</th>
               <th className="px-3 py-3 font-semibold">Stock</th>
               <th className="px-3 py-3 font-semibold">Price</th>
+              <th className="px-3 py-3 font-semibold">{momentumWindowLabels(result.rankingOption)[0]}</th>
+              <th className="px-3 py-3 font-semibold">{momentumWindowLabels(result.rankingOption)[1]}</th>
+              <th className="px-3 py-3 font-semibold">Momentum Score</th>
               <th className="px-3 py-3 font-semibold">Filter Return</th>
               <th className="px-3 py-3 font-semibold">1W</th>
               <th className="px-3 py-3 font-semibold">1M</th>
@@ -392,19 +425,23 @@ function FilterResults({
               <tr className="border-b border-[var(--border)] last:border-b-0" key={`${row.instrumentId}-${row.rank}`}>
                 <td className="px-3 py-3">
                   <button
-                    className="h-8 rounded-md border border-[var(--border)] bg-white px-3 text-xs font-semibold text-[var(--foreground)] transition hover:bg-[var(--panel-soft)]"
+                    className="h-8 rounded-md border border-[var(--border)] bg-white px-3 text-xs font-semibold text-[var(--foreground)] transition hover:bg-[var(--panel-soft)] disabled:cursor-not-allowed disabled:bg-[var(--panel-soft)] disabled:text-[var(--muted)]"
+                    disabled={selectedInstrumentIds.has(row.instrumentId)}
                     onClick={() => onAdd(row)}
                     type="button"
                   >
-                    Add
+                    {selectedInstrumentIds.has(row.instrumentId) ? "Added" : "Add"}
                   </button>
                 </td>
                 <td className="px-3 py-3 font-medium">{row.rank}</td>
                 <td className="px-3 py-3">
-                  <span className="block font-medium text-[var(--foreground)]">{row.companyName}</span>
-                  <span className="text-xs text-[var(--muted)]">{row.exchange}:{row.symbol}</span>
+                  <StockChartLink className="block font-medium text-[var(--accent)] hover:underline" date={row.actualEndDate} exchange={row.exchange} symbol={row.symbol}>{row.companyName}</StockChartLink>
+                  <span className="text-xs text-[var(--muted)]">{row.exchange}:{row.symbol} · </span><SectorStatus className="text-xs text-[var(--muted)]" date={row.actualEndDate} sector={row.sector} />
                 </td>
                 <td className="px-3 py-3 font-medium">{formatRupees(row.price)}</td>
+                <td className="px-3 py-3 font-semibold">{formatPercent(row.firstMomentumReturnPercent)}</td>
+                <td className="px-3 py-3 font-semibold">{formatPercent(row.secondMomentumReturnPercent)}</td>
+                <td className="px-3 py-3 font-semibold">{formatMomentumScore(row.momentumScore, result.rankingOption)}</td>
                 <td className="px-3 py-3 font-semibold">{formatPercent(row.returnPercent)}</td>
                 <td className="px-3 py-3 font-semibold">{formatNullablePercent(row.oneWeekReturnPercent)}</td>
                 <td className="px-3 py-3 font-semibold">{formatNullablePercent(row.oneMonthReturnPercent)}</td>
@@ -458,10 +495,10 @@ function ReturnResults({
             {positions.map((position) => (
               <tr className={`border-b border-[var(--border)] last:border-b-0 ${position.returnPercent === null && position.excludedReason ? "bg-neutral-50 text-[var(--muted)]" : ""}`} key={position.id}>
                 <td className="px-3 py-3">
-                  <span className="block font-medium text-[var(--foreground)]">{position.companyName}</span>
-                  <span className="text-xs text-[var(--muted)]">{position.isin}</span>
+                  <StockChartLink className="block font-medium text-[var(--accent)] hover:underline" date={position.actualEndDate ?? position.requestedEndDate} exchange={position.exchange} symbol={position.symbol}>{position.companyName}</StockChartLink>
+                  <span className="text-xs text-[var(--muted)]">{position.isin} · </span><SectorStatus className="text-xs text-[var(--muted)]" date={position.actualEndDate ?? position.requestedEndDate} sector={position.sector} />
                 </td>
-                <td className="px-3 py-3">{position.exchange}:{position.symbol}</td>
+                <td className="px-3 py-3"><StockChartLink className="hover:underline" date={position.actualEndDate ?? position.requestedEndDate} exchange={position.exchange} symbol={position.symbol}>{position.exchange}:{position.symbol}</StockChartLink></td>
                 <td className="px-3 py-3">
                   <input className="h-9 rounded-md border border-[var(--border)] bg-white px-2 text-sm outline-none focus:border-[var(--accent)]" onChange={(event) => onDateChange(position.id, "requestedStartDate", event.target.value)} type="date" value={position.requestedStartDate} />
                 </td>
@@ -514,7 +551,11 @@ function StatsStrip({ stats }: { readonly stats: ReturnExperimentStats }) {
   );
 }
 
-function pendingPositionFromFilterRow(row: HistoricalFilterRow): WorkspacePosition {
+function pendingPositionFromFilterRow(row: HistoricalFilterRow, latestMarketDate: string | null): WorkspacePosition {
+  const requestedEndDate = latestMarketDate && latestMarketDate > row.actualEndDate
+    ? latestMarketDate
+    : row.actualEndDate;
+
   return {
     id: `pending-${crypto.randomUUID()}`,
     persisted: false,
@@ -525,7 +566,7 @@ function pendingPositionFromFilterRow(row: HistoricalFilterRow): WorkspacePositi
     symbol: row.symbol,
     exchange: row.exchange,
     requestedStartDate: row.actualEndDate,
-    requestedEndDate: row.actualEndDate,
+    requestedEndDate,
     actualStartDate: null,
     actualEndDate: null,
     startPrice: null,
@@ -535,6 +576,49 @@ function pendingPositionFromFilterRow(row: HistoricalFilterRow): WorkspacePositi
     excludedReason: null,
     createdAt: new Date().toISOString(),
   };
+}
+
+function extendSameDayPositions(experiment: ReturnExperimentView, latestMarketDate: string | null) {
+  if (!latestMarketDate) return { experiment, changed: false };
+  let changed = false;
+  const positions = experiment.positions.map((position) => {
+    if (
+      position.requestedStartDate !== position.requestedEndDate ||
+      position.requestedEndDate >= latestMarketDate
+    ) {
+      return position;
+    }
+
+    changed = true;
+    return {
+      ...position,
+      requestedEndDate: latestMarketDate,
+      actualStartDate: null,
+      actualEndDate: null,
+      startPrice: null,
+      endPrice: null,
+      holdingDays: null,
+      returnPercent: null,
+      excludedReason: null,
+    };
+  });
+
+  return {
+    changed,
+    experiment: changed ? { ...experiment, positions } : experiment,
+  };
+}
+
+function shiftIsoDateMonths(value: string, months: number) {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCMonth(date.getUTCMonth() + months);
+  return date.toISOString().slice(0, 10);
+}
+
+function localDateInputValue() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
 }
 
 function toApiPosition(position: WorkspacePosition) {
@@ -607,4 +691,12 @@ function formatRupees(value: number | null) {
 
 function formatNullablePercent(value: number | null) {
   return value === null ? "-" : formatPercent(value);
+}
+
+function momentumWindowLabels(rankingOption: HistoricalMomentumRankingOption): readonly [string, string] {
+  return rankingOption.endsWith("1M3M") ? ["1M", "3M"] : ["6M", "12M"];
+}
+
+function formatMomentumScore(value: number, rankingOption: HistoricalMomentumRankingOption) {
+  return rankingOption.startsWith("raw") ? formatPercent(value) : value.toFixed(4);
 }

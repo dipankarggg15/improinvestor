@@ -1,8 +1,11 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { prisma } from "@/lib/db/prisma";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/ui/format";
+import { strategyVersionDisplayName } from "@/lib/strategies/version-presentation";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +54,7 @@ export default async function StrategyRunPage({ params, searchParams }: Strategy
       id: snapshot.id,
       rank: snapshot.rank,
       companyName: snapshot.company.name,
+      sector: snapshot.company.sector,
       symbol: snapshot.instrument.symbol,
       exchange: snapshot.instrument.exchange,
       selected: snapshot.selected,
@@ -75,7 +79,11 @@ export default async function StrategyRunPage({ params, searchParams }: Strategy
           <p className="mt-3 text-sm font-medium text-[var(--accent)]">PRICE / VOLUME STRATEGY</p>
           <h1 className="mt-2 text-3xl font-semibold">{run.strategy.name} Run</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            V{run.strategyVersion.versionNumber} selected on {formatDate(run.runDate)} and tested through {formatDate(endDate)}.
+            {strategyVersionDisplayName({
+              strategyName: run.strategy.name,
+              versionNumber: run.strategyVersion.versionNumber,
+              storedLabel: run.strategyVersion.label,
+            })} selected on {formatDate(run.runDate)} and tested through {formatDate(endDate)}.
           </p>
         </div>
 
@@ -116,8 +124,8 @@ export default async function StrategyRunPage({ params, searchParams }: Strategy
                   <tr className={`border-t border-[var(--border)] align-top ${row.selected ? "bg-green-50" : ""}`} key={row.id}>
                     <td className="py-3 pr-3 font-medium">{row.rank ?? "-"}</td>
                     <td className="py-3 pr-3">
-                      <span className="block font-medium">{row.companyName}</span>
-                      <span className="text-xs text-[var(--muted)]">{row.exchange}:{row.symbol}</span>
+                      <StockChartLink className="block font-medium text-[var(--accent)] hover:underline" date={formatDate(run.runDate)} exchange={row.exchange} symbol={row.symbol}>{row.companyName}</StockChartLink>
+                      <span className="text-xs text-[var(--muted)]">{row.exchange}:{row.symbol} · </span><SectorStatus className="text-xs text-[var(--muted)]" date={formatDate(run.runDate)} sector={row.sector} />
                     </td>
                     <td className="py-3 pr-3">{formatOptionalCurrency(row.startPrice)}</td>
                     <td className="py-3 pr-3">{formatOptionalCurrency(row.endPrice)}</td>

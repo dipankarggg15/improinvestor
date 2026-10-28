@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { recordTradeAction } from "@/app/portfolio/actions";
 import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
+import { SectorStatus } from "@/components/sectors/sector-status";
 
 type PortfolioOption = {
   readonly id: string;
@@ -28,6 +29,7 @@ type StockSuggestion = {
   readonly companyName: string;
   readonly symbol: string;
   readonly exchange: string;
+  readonly sector: string | null;
   readonly availableQuantity?: string;
   readonly strategyLabel?: string;
 };
@@ -243,7 +245,7 @@ function StockAutocomplete({
       />
       {selectedStock ? (
         <span className="text-xs text-[var(--muted)]">
-          Selected: {selectedStock.companyName} · {selectedStock.symbol} · {selectedStock.exchange}
+          Selected: {selectedStock.companyName} · {selectedStock.symbol} · {selectedStock.exchange} · <SectorStatus sector={selectedStock.sector} />
           {selectedStock.availableQuantity ? ` · Available ${selectedStock.availableQuantity}` : ""}
         </span>
       ) : null}
@@ -263,7 +265,7 @@ function StockAutocomplete({
             >
               <span className="block text-sm font-semibold">{stock.companyName}</span>
               <span className="text-xs text-[var(--muted)]">
-                {stock.symbol} · {stock.exchange}
+                {stock.symbol} · {stock.exchange} · <SectorStatus sector={stock.sector} />
                 {stock.strategyLabel ? ` · ${stock.strategyLabel}` : ""}
                 {stock.availableQuantity ? ` · Qty ${stock.availableQuantity}` : ""}
               </span>

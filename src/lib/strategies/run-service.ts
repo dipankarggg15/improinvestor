@@ -16,27 +16,29 @@ const maxPriceLoadAttempts = 3;
 
 export async function runCurrentStrategyVersion(input: {
   readonly strategyId: string;
+  readonly strategyVersionId?: string;
   readonly runDate: Date;
   readonly client?: PrismaClient;
 }) {
   const client = await getPrismaClient(input.client);
-  const version = await client.strategyVersion.findFirst({
-    where: {
-      strategyId: input.strategyId,
-      effectiveFrom: {
-        lte: input.runDate,
-      },
-    },
-    orderBy: {
-      versionNumber: "desc",
-    },
-    include: {
-      strategy: true,
-    },
-  });
+  const version = input.strategyVersionId
+    ? await client.strategyVersion.findFirst({
+        where: { id: input.strategyVersionId, strategyId: input.strategyId },
+        include: { strategy: true },
+      })
+    : await client.strategyVersion.findFirst({
+        where: {
+          strategyId: input.strategyId,
+          effectiveFrom: { lte: input.runDate },
+        },
+        orderBy: { versionNumber: "desc" },
+        include: { strategy: true },
+      });
 
   if (!version) {
-    throw new Error("No effective strategy version exists for the selected run date.");
+    throw new Error(input.strategyVersionId
+      ? "Selected strategy version does not belong to this strategy."
+      : "No effective strategy version exists for the selected run date.");
   }
 
   return runStrategyVersion({
@@ -54,6 +56,14 @@ export async function runStrategyVersion(input: {
   readonly client?: PrismaClient;
 }) {
   const client = await getPrismaClient(input.client);
+  const version = await client.strategyVersion.findUniqueOrThrow({
+    where: { id: input.strategyVersionId },
+    include: { strategy: true },
+  });
+  if (version.strategyId !== input.strategyId) {
+    throw new Error("Selected strategy version does not belong to this strategy.");
+  }
+
   const existing = await client.strategyRun.findUnique({
     where: {
       strategyVersionId_runDate: {
@@ -66,15 +76,6 @@ export async function runStrategyVersion(input: {
   if (existing) {
     return existing;
   }
-
-  const version = await client.strategyVersion.findUniqueOrThrow({
-    where: {
-      id: input.strategyVersionId,
-    },
-    include: {
-      strategy: true,
-    },
-  });
   const config = strategyConfigForDisplay(version.strategy.name, version.config);
   const [snapshot, activeHoldings] = await Promise.all([
     loadStrategyMarketSnapshot(client, config, input.runDate),

@@ -167,11 +167,18 @@ enum HistoricalStrategyPositionStatus {
   OPEN_AT_END
 }
 
+enum WatchlistItemState {
+  WATCHING
+  BOUGHT
+  ARCHIVED
+}
+
 model Company {
   id           String                @id @default(cuid())
   name         String
   isin         String                @unique
   sector       String?
+  nifty500Sector String?
   marketDataSource MarketDataSource  @default(SYNTHETIC)
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
@@ -186,9 +193,11 @@ model Company {
   counterfactualDecisionSnapshots CounterfactualDecisionSnapshot[]
   returnExperimentPositions ReturnExperimentPosition[]
   historicalStrategyPositions HistoricalStrategyPosition[]
+  watchlistItems WatchlistItem[]
 
   @@index([name])
   @@index([sector])
+  @@index([nifty500Sector])
   @@index([marketDataSource])
 }
 
@@ -213,6 +222,7 @@ model Instrument {
   counterfactualDecisionSnapshots CounterfactualDecisionSnapshot[]
   returnExperimentPositions ReturnExperimentPosition[]
   historicalStrategyPositions HistoricalStrategyPosition[]
+  watchlistItems WatchlistItem[]
 
   @@unique([exchange, symbol])
   @@unique([exchange, instrumentKey])
@@ -247,6 +257,41 @@ model CompanyFundamentals {
   marketCap    Decimal? @db.Decimal(20, 2)
   peRatio      Decimal? @db.Decimal(12, 4)
   debtToEquity Decimal? @db.Decimal(12, 4)
+  companyProfile String?
+  pbRatio      Decimal? @db.Decimal(12, 4)
+  roaPercent   Decimal? @db.Decimal(12, 4)
+  roePercent   Decimal? @db.Decimal(12, 4)
+  rocePercent  Decimal? @db.Decimal(12, 4)
+  evEbitda     Decimal? @db.Decimal(12, 4)
+  sectorPeRatio Decimal? @db.Decimal(12, 4)
+  sectorPbRatio Decimal? @db.Decimal(12, 4)
+  sectorRoaPercent Decimal? @db.Decimal(12, 4)
+  sectorRoePercent Decimal? @db.Decimal(12, 4)
+  sectorRocePercent Decimal? @db.Decimal(12, 4)
+  sectorEvEbitda Decimal? @db.Decimal(12, 4)
+  revenueCrore Decimal? @db.Decimal(20, 2)
+  operatingProfitCrore Decimal? @db.Decimal(20, 2)
+  netProfitCrore Decimal? @db.Decimal(20, 2)
+  revenueGrowthPercent Decimal? @db.Decimal(12, 4)
+  profitGrowthPercent Decimal? @db.Decimal(12, 4)
+  salesCagr3YPercent Decimal? @db.Decimal(12, 4)
+  profitCagr3YPercent Decimal? @db.Decimal(12, 4)
+  operatingMarginPercent Decimal? @db.Decimal(12, 4)
+  netMarginPercent Decimal? @db.Decimal(12, 4)
+  operatingCashFlowCrore Decimal? @db.Decimal(20, 2)
+  cashFlowToProfit Decimal? @db.Decimal(12, 4)
+  promoterHoldingPercent Decimal? @db.Decimal(12, 4)
+  promoterHoldingChangePercent Decimal? @db.Decimal(12, 4)
+  fiiHoldingPercent Decimal? @db.Decimal(12, 4)
+  fiiHoldingChangePercent Decimal? @db.Decimal(12, 4)
+  diiHoldingPercent Decimal? @db.Decimal(12, 4)
+  diiHoldingChangePercent Decimal? @db.Decimal(12, 4)
+  mutualFundHoldingPercent Decimal? @db.Decimal(12, 4)
+  retailHoldingPercent Decimal? @db.Decimal(12, 4)
+  statementPeriod String?
+  holdingPeriod String?
+  rawData Json?
+  fetchedAt DateTime @default(now())
   marketDataSource MarketDataSource @default(SYNTHETIC)
   company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -272,6 +317,44 @@ model DataSync {
 
   @@index([provider, dataType])
   @@index([status, startedAt])
+}
+
+model Watchlist {
+  id          String          @id @default(cuid())
+  name        String          @unique
+  description String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  items       WatchlistItem[]
+
+  @@index([updatedAt])
+}
+
+model WatchlistItem {
+  id                     String             @id @default(cuid())
+  watchlistId            String
+  companyId              String
+  instrumentId           String
+  source                 String?
+  state                  WatchlistItemState @default(WATCHING)
+  manualSupportLow       Decimal?           @db.Decimal(18, 4)
+  manualSupportHigh      Decimal?           @db.Decimal(18, 4)
+  detectedSupportLow     Decimal?           @db.Decimal(18, 4)
+  detectedSupportHigh    Decimal?           @db.Decimal(18, 4)
+  detectedAt             DateTime?          @db.Date
+  alertDistancePercent   Decimal            @default(1) @db.Decimal(8, 4)
+  notes                  String?
+  lastReviewedAt         DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  watchlist              Watchlist          @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  company                Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  instrument             Instrument         @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+
+  @@unique([watchlistId, instrumentId])
+  @@index([watchlistId, state, updatedAt])
+  @@index([companyId])
+  @@index([instrumentId])
 }
 
 model ReturnExperiment {
@@ -375,6 +458,7 @@ model HistoricalStrategyRun {
   unavailableFilters       Json
   limitations              Json
   assumptions              Json
+  reportMetrics            Json?
   errorMessage             String?
   startedAt                DateTime                    @default(now())
   completedAt              DateTime?
@@ -436,6 +520,7 @@ model HistoricalStrategyEvent {
 
   @@index([runId, eventDate])
   @@index([runId, eventType])
+  @@index([positionId])
   @@index([companyId])
   @@index([instrumentId])
 }

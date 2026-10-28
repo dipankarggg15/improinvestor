@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { prisma } from "@/lib/db/prisma";
 import { formatCurrency, formatDate, formatPercent, formatQuantity } from "@/lib/ui/format";
 
@@ -32,7 +34,7 @@ export default async function TradeDetailPage({ params }: TradeDetailPageProps) 
           <p className="text-sm font-medium text-[var(--accent)]">REAL MARKET DATA</p>
           <h1 className="mt-2 text-3xl font-semibold">Trade Audit</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            Immutable trade ledger record for {trade.company.name}.
+            Immutable trade ledger record for <StockChartLink className="font-medium text-[var(--accent)] hover:underline" exchange={trade.instrument.exchange} symbol={trade.instrument.symbol}>{trade.company.name}</StockChartLink>.
           </p>
         </div>
 
@@ -42,6 +44,7 @@ export default async function TradeDetailPage({ params }: TradeDetailPageProps) 
             <Info label="Portfolio" value={trade.portfolio.name} />
             <Info label="Strategy" value={trade.portfolio.strategy.name} />
             <Info label="Company" value={trade.company.name} />
+            <Info label="Sector" value={<SectorStatus date={formatDate(trade.tradeDate)} sector={trade.company.sector} />} />
             <Info label="Symbol" value={`${trade.instrument.symbol} (${trade.instrument.exchange})`} />
             <Info label="Side" value={trade.side} />
             <Info label="Trade Date" value={formatDate(trade.tradeDate)} />
@@ -78,7 +81,7 @@ export default async function TradeDetailPage({ params }: TradeDetailPageProps) 
   );
 }
 
-function Info({ label, value }: { readonly label: string; readonly value: string }) {
+function Info({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-4">
       <dt className="text-[var(--muted)]">{label}</dt>

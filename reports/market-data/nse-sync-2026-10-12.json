@@ -1,0 +1,125 @@
+{
+  "checkedAt": "2026-10-12T05:29:09.057Z",
+  "exchange": "NSE",
+  "source": "UPSTOX_REAL",
+  "nseInstruments": 3513,
+  "instrumentsWithPrices": 3508,
+  "totalRows": 7543536,
+  "rowsAddedSinceNseOnlyAudit": 490340,
+  "earliestDates": [
+    [
+      "2000-01-03",
+      2
+    ],
+    [
+      "2000-01-04",
+      1
+    ],
+    [
+      "2003-01-01",
+      309
+    ],
+    [
+      "2003-01-27",
+      167
+    ],
+    [
+      "2003-01-28",
+      2
+    ],
+    [
+      "2003-01-29",
+      3
+    ],
+    [
+      "2003-02-28",
+      1
+    ],
+    [
+      "2003-03-12",
+      1
+    ],
+    [
+      "2003-03-17",
+      2
+    ],
+    [
+      "2003-04-04",
+      1
+    ]
+  ],
+  "latestDates": [
+    [
+      "2026-10-09",
+      3341
+    ],
+    [
+      "2026-10-08",
+      66
+    ],
+    [
+      "2026-10-07",
+      20
+    ],
+    [
+      "2026-10-06",
+      13
+    ],
+    [
+      "2026-10-05",
+      23
+    ],
+    [
+      "2026-10-01",
+      5
+    ],
+    [
+      "2026-09-30",
+      8
+    ],
+    [
+      "2026-09-29",
+      1
+    ],
+    [
+      "2026-09-28",
+      2
+    ],
+    [
+      "2026-09-25",
+      1
+    ],
+    [
+      "2026-09-22",
+      1
+    ],
+    [
+      "2026-09-21",
+      1
+    ],
+    [
+      "2026-09-17",
+      3
+    ],
+    [
+      "2026-09-11",
+      1
+    ],
+    [
+      "2026-09-10",
+      8
+    ]
+  ],
+  "unresolvedIsinConflicts": [
+    "BLSE",
+    "BUILDPRO",
+    "ORIANA",
+    "TAALTECH"
+  ],
+  "notes": [
+    "Counts verified from the database, not the older sync counter.",
+    "Existing BSE records retained; all fetching after scope clarification was NSE-only.",
+    "Coverage varies by instrument; this audit does not certify every interior date.",
+    "Today is 2026-10-12; its daily session was incomplete during this sync."
+  ]
+}

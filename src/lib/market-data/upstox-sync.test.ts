@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { MarketDataProvider, ProviderDailyCandle, ProviderInstrument } from "@/lib/market-data/types";
 import {
@@ -10,6 +10,32 @@ import {
 } from "@/lib/market-data/upstox-sync";
 
 describe("Upstox real-market sync", () => {
+  it("waits for the full provider cooldown before retrying", async () => {
+    vi.useFakeTimers();
+    try {
+      let requests = 0;
+      const run = runUpstoxRealMarketSync({
+        client: createFakePrisma() as never,
+        provider: providerWith({
+          instruments: [instrument({ exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|INE002A01018", isin: "INE002A01018" })],
+          onCandles(input) {
+            if (++requests === 1) throw Object.assign(new Error("Upstox rate limit exceeded."), { retryAfterMs: 310000 });
+            return [candle(input.instrumentKey, "2026-09-07")];
+          },
+        }),
+        mode: "backfill",
+        startDate: new Date("2026-09-01"),
+        endDate: new Date("2026-09-07"),
+      });
+      await vi.advanceTimersByTimeAsync(309999);
+      expect(requests).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await run).successful).toBe(1);
+      expect(requests).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("canonicalizes dual-listed companies by ISIN and prefers NSE", () => {
     const companies = canonicalizeUpstoxEquities([
       instrument({ exchange: "BSE", symbol: "500325", instrumentKey: "BSE_EQ|INE002A01018", isin: "INE002A01018" }),
@@ -29,7 +55,7 @@ describe("Upstox real-market sync", () => {
 
   it("backfills a small batch idempotently with company, instrument, and candle upserts", async () => {
     const client = createFakePrisma();
-    const result = await runUpstoxRealMarketSync({
+    const options = {
       client: client as never,
       provider: providerWith({
         instruments: [
@@ -37,10 +63,11 @@ describe("Upstox real-market sync", () => {
           instrument({ exchange: "BSE", symbol: "500325", instrumentKey: "BSE_EQ|INE002A01018", isin: "INE002A01018" }),
         ],
       }),
-      mode: "backfill",
+      mode: "backfill" as const,
       limit: 1,
       now: new Date("2026-09-08T08:00:00.000Z"),
-    });
+    };
+    const result = await runUpstoxRealMarketSync(options);
 
     expect(result.successful).toBe(2);
     expect(result.failed).toBe(0);
@@ -49,6 +76,65 @@ describe("Upstox real-market sync", () => {
     expect(client.state.instruments).toHaveLength(2);
     expect(client.state.dailyPrices).toHaveLength(4);
     expect(client.state.dailyPrices.every((price) => price.marketDataSource === "UPSTOX_REAL")).toBe(true);
+    expect((await runUpstoxRealMarketSync(options)).candlesUpserted).toBe(0);
+    expect(client.state.dailyPrices).toHaveLength(4);
+  });
+
+  it("updates a changed Upstox instrument key without duplicating the exchange symbol", async () => {
+    const client = createFakePrisma();
+    client.state.companies.push({ id: "company-1", isin: "INE002A01018", name: "Reliance", marketDataSource: "UPSTOX_REAL" });
+    client.state.instruments.push({
+      id: "instrument-1",
+      companyId: "company-1",
+      exchange: "NSE",
+      symbol: "RELIANCE",
+      instrumentKey: "NSE_EQ|OLD_KEY",
+      marketDataSource: "UPSTOX_REAL",
+    });
+
+    const result = await runUpstoxRealMarketSync({
+      client: client as never,
+      provider: providerWith({
+        instruments: [instrument({ exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|INE002A01018", isin: "INE002A01018" })],
+      }),
+      mode: "backfill",
+      startDate: new Date("2026-09-07"),
+      endDate: new Date("2026-09-07"),
+    });
+
+    expect(result.failed).toBe(0);
+    expect(client.state.instruments).toHaveLength(1);
+    expect(client.state.instruments[0]?.instrumentKey).toBe("NSE_EQ|INE002A01018");
+  });
+
+  it("reconciles separate rows that already own the current symbol and instrument key", async () => {
+    const client = createFakePrisma();
+    client.state.companies.push({ id: "company-1", isin: "INE002A01018", name: "Reliance", marketDataSource: "UPSTOX_REAL" });
+    client.state.instruments.push(
+      { id: "instrument-symbol", companyId: "company-1", exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|OLD_KEY", marketDataSource: "UPSTOX_REAL" },
+      { id: "instrument-key", companyId: "company-1", exchange: "NSE", symbol: "RELIANCE-OLD", instrumentKey: "NSE_EQ|INE002A01018", marketDataSource: "UPSTOX_REAL" },
+    );
+
+    const result = await runUpstoxRealMarketSync({
+      client: client as never,
+      provider: providerWith({
+        instruments: [instrument({ exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|INE002A01018", isin: "INE002A01018" })],
+      }),
+      mode: "backfill",
+      startDate: new Date("2026-09-07"),
+      endDate: new Date("2026-09-07"),
+    });
+
+    expect(result.failed).toBe(0);
+    expect(client.state.instruments.find((row) => row.id === "instrument-symbol")).toMatchObject({
+      symbol: "RELIANCE",
+      instrumentKey: "NSE_EQ|INE002A01018",
+    });
+    expect(client.state.instruments.find((row) => row.id === "instrument-key")).toMatchObject({
+      active: false,
+      symbol: "__SUPERSEDED__instrument-key",
+      instrumentKey: "__SUPERSEDED__instrument-key",
+    });
   });
 
   it("incremental sync starts after the latest stored candle", async () => {
@@ -78,28 +164,33 @@ describe("Upstox real-market sync", () => {
   });
 
   it("records failed instruments without failing the whole sync", async () => {
-    const result = await runUpstoxRealMarketSync({
-      client: createFakePrisma() as never,
-      provider: providerWith({
-        instruments: [
-          instrument({ exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|INE002A01018", isin: "INE002A01018" }),
-          instrument({ exchange: "NSE", symbol: "TCS", instrumentKey: "NSE_EQ|INE467B01029", isin: "INE467B01029" }),
-        ],
-        onCandles(input) {
-          if (input.instrumentKey.includes("INE467B")) {
-            return [{ ...candle(input.instrumentKey, "2026-09-07"), high: "90" }];
-          }
-          return [candle(input.instrumentKey, "2026-09-07")];
-        },
-      }),
-      mode: "backfill",
-      limit: 2,
-      now: new Date("2026-09-08T08:00:00.000Z"),
-    });
+    vi.useFakeTimers();
+    try {
+      const run = runUpstoxRealMarketSync({
+        client: createFakePrisma() as never,
+        provider: providerWith({
+          instruments: [
+            instrument({ exchange: "NSE", symbol: "RELIANCE", instrumentKey: "NSE_EQ|INE002A01018", isin: "INE002A01018" }),
+            instrument({ exchange: "NSE", symbol: "TCS", instrumentKey: "NSE_EQ|INE467B01029", isin: "INE467B01029" }),
+          ],
+          onCandles(input) {
+            if (input.instrumentKey.includes("INE467B")) throw new Error("simulated Upstox failure");
+            return [candle(input.instrumentKey, "2026-09-07")];
+          },
+        }),
+        mode: "backfill",
+        limit: 2,
+        now: new Date("2026-09-08T08:00:00.000Z"),
+      });
 
-    expect(result.successful).toBe(1);
-    expect(result.failed).toBe(1);
-    expect(result.failures[0]?.symbol).toBe("TCS");
+      await vi.runAllTimersAsync();
+      const result = await run;
+      expect(result.successful).toBe(1);
+      expect(result.failed).toBe(1);
+      expect(result.failures[0]?.symbol).toBe("TCS");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -155,7 +246,7 @@ function candle(instrumentKey: string, date: string): ProviderDailyCandle {
 function createFakePrisma() {
   const state = {
     companies: [] as Array<{ id: string; isin: string; name: string; marketDataSource: string }>,
-    instruments: [] as Array<{ id: string; companyId: string; exchange: string; symbol: string; instrumentKey: string; marketDataSource: string }>,
+    instruments: [] as Array<{ id: string; companyId: string; exchange: string; symbol: string; instrumentKey: string; marketDataSource: string; active?: boolean }>,
     dailyPrices: [] as Array<{ instrumentId: string; tradingDate: Date; marketDataSource: string }>,
     dataSync: [] as Array<{ id: string; data: unknown }>,
   };
@@ -176,16 +267,17 @@ function createFakePrisma() {
       },
     },
     instrument: {
-      async upsert(input: { where: { exchange_instrumentKey: { exchange: string; instrumentKey: string } }; update: { companyId: string; symbol: string; marketDataSource: string }; create: { companyId: string; exchange: string; symbol: string; instrumentKey: string; marketDataSource: string } }) {
-        const key = input.where.exchange_instrumentKey;
-        const existing = state.instruments.find((instrument) => instrument.exchange === key.exchange && instrument.instrumentKey === key.instrumentKey);
-        if (existing) {
-          existing.companyId = input.update.companyId;
-          existing.symbol = input.update.symbol;
-          existing.marketDataSource = input.update.marketDataSource;
-          return { id: existing.id, instrumentKey: existing.instrumentKey };
-        }
-        const row = { id: `instrument-${state.instruments.length + 1}`, ...input.create };
+      async findFirst(input: { where: { exchange: string; instrumentKey?: string; symbol?: string } }) {
+        return state.instruments.find((instrument) => instrument.exchange === input.where.exchange &&
+          (input.where.instrumentKey ? instrument.instrumentKey === input.where.instrumentKey : instrument.symbol === input.where.symbol)) ?? null;
+      },
+      async update(input: { where: { id: string }; data: { companyId: string; symbol: string; instrumentKey: string; marketDataSource: string } }) {
+        const existing = state.instruments.find((instrument) => instrument.id === input.where.id)!;
+        Object.assign(existing, input.data);
+        return { id: existing.id, instrumentKey: existing.instrumentKey };
+      },
+      async create(input: { data: { companyId: string; exchange: string; symbol: string; instrumentKey: string; marketDataSource: string } }) {
+        const row = { id: `instrument-${state.instruments.length + 1}`, ...input.data };
         state.instruments.push(row);
         return { id: row.id, instrumentKey: row.instrumentKey };
       },

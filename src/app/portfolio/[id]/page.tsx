@@ -3,6 +3,9 @@ import { notFound } from "next/navigation";
 
 import { runReviewAction } from "@/app/reviews/actions";
 import { ConfirmSubmitButton } from "@/components/forms/confirm-submit-button";
+import { LivePortfolioValuation } from "@/components/portfolio/live-portfolio-valuation";
+import { StockChartLink } from "@/components/stocks/stock-chart-link";
+import { SectorStatus } from "@/components/sectors/sector-status";
 import { prisma } from "@/lib/db/prisma";
 import { listClosedEpisodes } from "@/lib/exits/service";
 import { valuePortfolioAsOf } from "@/lib/portfolio/service";
@@ -80,6 +83,22 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
           <Stat label="Return" value={formatPercent(valuation.totalReturnPercent.toNumber())} />
         </div>
 
+        <LivePortfolioValuation
+          cash={valuation.cash.toNumber()}
+          initialCapital={portfolio.initialCapital.toNumber()}
+          positions={valuation.positions.flatMap((position) => {
+            const company = companiesById.get(position.companyId);
+            const instrument = company?.instruments.find((item) => item.id === position.instrumentId);
+            return instrument ? [{
+              instrumentKey: instrument.instrumentKey,
+              symbol: instrument.symbol,
+              quantity: position.quantity.toNumber(),
+              averageCost: position.averageCost.toNumber(),
+              fallbackPrice: position.currentPrice?.toNumber() ?? null,
+            }] : [];
+          })}
+        />
+
         <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Closed Positions</h2>
           <div className="mt-4 max-w-full overflow-x-auto">
@@ -95,10 +114,10 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
                 {portfolioClosedEpisodes.map((episode) => (
                   <tr className="border-t border-[var(--border)]" key={episode.id}>
                     <td className="py-3 pr-3">
-                      <Link className="font-medium text-[var(--accent)]" href={`/portfolio/${portfolio.id}/episodes/${episode.id}`}>
-                        {episode.company.name}
-                      </Link>
+                      <StockChartLink className="font-medium text-[var(--accent)] hover:underline" exchange={episode.instrument.exchange} symbol={episode.instrument.symbol}>{episode.company.name}</StockChartLink>
                       <span className="ml-2 text-xs text-[var(--muted)]">{episode.instrument.symbol} {episode.instrument.exchange}</span>
+                      <SectorStatus className="block text-xs text-[var(--muted)]" sector={episode.company.sector} />
+                      <Link className="ml-2 text-xs text-[var(--accent)] hover:underline" href={`/portfolio/${portfolio.id}/episodes/${episode.id}`}>Episode</Link>
                     </td>
                     <td className="py-3 pr-3">{formatDate(episode.openedAt)}</td>
                     <td className="py-3 pr-3">{episode.closedAt ? formatDate(episode.closedAt) : "-"}</td>
@@ -140,7 +159,7 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
 
                   return (
                     <tr className="border-t border-[var(--border)]" key={`${position.companyId}-${position.instrumentId}`}>
-                      <td className="py-3 pr-3">{company?.name ?? position.companyId}</td>
+                      <td className="py-3 pr-3">{instrument ? <StockChartLink className="block font-medium text-[var(--accent)] hover:underline" exchange={instrument.exchange} symbol={instrument.symbol}>{company?.name ?? position.companyId}</StockChartLink> : company?.name ?? position.companyId}<SectorStatus className="block text-xs text-[var(--muted)]" sector={company?.sector} /></td>
                       <td className="py-3 pr-3 font-medium">{instrument?.symbol ?? "-"}</td>
                       <td className="py-3 pr-3">{formatQuantity(position.quantity.toNumber())}</td>
                       <td className="py-3 pr-3">{formatCurrency(position.averageCost.toNumber())}</td>
@@ -275,7 +294,7 @@ export default async function PortfolioDetailPage({ params }: PortfolioDetailPag
                         {formatDate(trade.tradeDate)}
                       </Link>
                     </td>
-                    <td className="py-3 pr-3">{trade.company.name}</td>
+                    <td className="py-3 pr-3"><StockChartLink className="block font-medium text-[var(--accent)] hover:underline" exchange={trade.instrument.exchange} symbol={trade.instrument.symbol}>{trade.company.name}</StockChartLink><SectorStatus className="text-xs text-[var(--muted)]" sector={trade.company.sector} /></td>
                     <td className="py-3 pr-3">{trade.side}</td>
                     <td className="py-3 pr-3">{formatQuantity(trade.quantity.toNumber())}</td>
                     <td className="py-3 pr-3">{formatCurrency(trade.price.toNumber())}</td>
