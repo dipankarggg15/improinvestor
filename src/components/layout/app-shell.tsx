@@ -47,6 +47,7 @@ const sectionNavigation = [
 
 export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   const pathname = usePathname();
+  const authPage = isAuthenticationPage(pathname);
   const router = useRouter();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [dailySync, setDailySync] = useState<DailyMarketSyncStatus | null>(null);
@@ -80,7 +81,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   }, [mobileNavOpen]);
 
   useEffect(() => {
-    if (pathname === "/login") return;
+    if (authPage) return;
     let disposed = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -114,9 +115,9 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
       disposed = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [pathname, router]);
+  }, [authPage, pathname, router]);
 
-  if (pathname === "/login") {
+  if (authPage) {
     return <>{children}</>;
   }
 
@@ -230,6 +231,10 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
       </div>
     </div>
   );
+}
+
+function isAuthenticationPage(pathname: string) {
+  return pathname === "/login" || pathname === "/forgot-password" || pathname === "/reset-password";
 }
 
 function Brand({ compact = false }: { readonly compact?: boolean }) {
