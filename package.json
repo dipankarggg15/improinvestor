@@ -32,7 +32,7 @@
     "schema:sectors": "tsx scripts/apply-sector-universe-schema.ts",
     "schema:fundamentals": "tsx scripts/apply-fundamentals-schema.ts",
     "schema:verify": "tsx scripts/verify-prisma-schema.ts",
-    "schema:online:all": "npm run schema:watchlists && npm run schema:sectors && npm run schema:fundamentals && tsx scripts/apply-return-experiment-schema.ts && npm run schema:verify",
+    "schema:online:all": "npm run schema:watchlists && npm run schema:sectors && npm run schema:fundamentals && tsx scripts/apply-return-experiment-schema.ts && tsx scripts/apply-online-final-schema.ts && npm run schema:verify",
     "measure:market-storage": "tsx scripts/measure-market-storage.ts",
     "validate:real-market": "tsx scripts/validate-real-market-import.ts",
     "cleanup:dummy-data": "tsx scripts/cleanup-dummy-data.ts",
